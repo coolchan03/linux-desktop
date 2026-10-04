@@ -33,6 +33,6 @@ sleep 2
 export DISPLAY=:0
 
 # Bring the built-in display to the front.
-am start --user 0 -n com.termux/com.termux.x11.MainActivity >/dev/null 2>&1
+am start --user 0 -n @PKG@/com.termux.x11.MainActivity >/dev/null 2>&1
 
 exec dbus-launch --exit-with-session startxfce4

@@ -23,7 +23,11 @@ import com.termux.shared.termux.TermuxConstants;
 import com.termux.shared.termux.TermuxUtils;
 import com.termux.shared.termux.shell.command.environment.TermuxShellEnvironment;
 
+import com.termux.app.desktop.DesktopLauncher;
+import com.termux.app.desktop.PathRelocator;
+
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -169,7 +173,7 @@ public final class TermuxInstaller {
                                         throw new RuntimeException("Malformed symlink line: " + line);
                                     String oldPath = parts[0];
                                     String newPath = TERMUX_STAGING_PREFIX_DIR_PATH + "/" + parts[1];
-                                    symlinks.add(Pair.create(oldPath, newPath));
+                                    symlinks.add(Pair.create(PathRelocator.relocate(oldPath), newPath));
 
                                     error = ensureDirectoryExists(new File(newPath).getParentFile());
                                     if (error != null) {
@@ -189,10 +193,14 @@ public final class TermuxInstaller {
                                 }
 
                                 if (!isDirectory) {
+                                    // The official bootstrap has /data/data/com.termux compiled in; rewrite it
+                                    // for this app's package name before the file is written.
+                                    ByteArrayOutputStream contents = new ByteArrayOutputStream();
+                                    int readBytes;
+                                    while ((readBytes = zipInput.read(buffer)) != -1)
+                                        contents.write(buffer, 0, readBytes);
                                     try (FileOutputStream outStream = new FileOutputStream(targetFile)) {
-                                        int readBytes;
-                                        while ((readBytes = zipInput.read(buffer)) != -1)
-                                            outStream.write(buffer, 0, readBytes);
+                                        outStream.write(PathRelocator.relocate(contents.toByteArray()));
                                     }
                                     if (zipEntryName.startsWith("bin/") || zipEntryName.startsWith("libexec") ||
                                         zipEntryName.startsWith("lib/apt/apt-helper") || zipEntryName.startsWith("lib/apt/methods")) {
@@ -203,6 +211,10 @@ public final class TermuxInstaller {
                             }
                         }
                     }
+
+                    // Packages installed later also have the old path compiled in; this apt hook rewrites
+                    // each .deb before dpkg unpacks it.
+                    DesktopLauncher.installRelocationHook(activity, TERMUX_STAGING_PREFIX_DIR_PATH);
 
                     if (symlinks.isEmpty())
                         throw new RuntimeException("No SYMLINKS.txt encountered");

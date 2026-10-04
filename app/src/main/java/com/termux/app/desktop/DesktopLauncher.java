@@ -104,11 +104,41 @@ public class DesktopLauncher {
         }
     }
 
+    /**
+     * Installs the apt hook that rewrites Termux's prebuilt packages for this app's package name (see
+     * {@link PathRelocator}) into {@code stagingPrefix}, which becomes {@code $PREFIX} once bootstrap is done.
+     */
+    public static void installRelocationHook(Context context, String stagingPrefix) throws IOException {
+        String script;
+        try (InputStream in = context.getAssets().open(ASSET_DIR + "lxdesk-relocate-debs")) {
+            script = new String(readAll(in), StandardCharsets.UTF_8)
+                .replace("@PREFIX@", TermuxConstants.TERMUX_PREFIX_DIR_PATH)
+                .replace("@NEW_PKG@", TermuxConstants.TERMUX_PACKAGE_NAME);
+        }
+        File bin = new File(stagingPrefix, "bin/lxdesk-relocate-debs");
+        writeFile(bin, script);
+        if (!bin.setExecutable(true, false)) throw new IOException("Cannot chmod " + bin);
+
+        File conf = new File(stagingPrefix, "etc/apt/apt.conf.d/99-lxdesk-relocate");
+        if (!conf.getParentFile().isDirectory() && !conf.getParentFile().mkdirs())
+            throw new IOException("Cannot create " + conf.getParentFile());
+        writeFile(conf, "// Rewrites Termux packages for this app's package name before dpkg unpacks them.\n"
+            + "DPkg::Pre-Install-Pkgs { \"" + TermuxConstants.TERMUX_PREFIX_DIR_PATH + "/bin/lxdesk-relocate-debs\"; };\n");
+    }
+
+    private static void writeFile(File file, String text) throws IOException {
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) {
+            out.write(text.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
     private static boolean writeScripts(Context context) {
         String apkPath = context.getApplicationInfo().sourceDir;
         for (String name : SCRIPTS) {
             try (InputStream in = context.getAssets().open(ASSET_DIR + name)) {
-                String body = new String(readAll(in), StandardCharsets.UTF_8).replace("@APK_PATH@", apkPath);
+                String body = PathRelocator.relocate(new String(readAll(in), StandardCharsets.UTF_8))
+                    .replace("@APK_PATH@", apkPath)
+                    .replace("@PKG@", context.getPackageName());
                 File out = new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, name);
                 // Always rewritten: the APK path embedded in termux-x11 changes on every app update.
                 if (out.exists() && !out.delete()) throw new IOException("Cannot replace " + out);
