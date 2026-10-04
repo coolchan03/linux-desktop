@@ -5,12 +5,18 @@
 
 MARK="$HOME/.config/linux-desktop"
 mkdir -p "$MARK"
+# The app's setup screen reads these files to show progress.
+progress() { echo "$1|$2" > "$MARK/progress"; }
+state() { echo "$1" > "$MARK/state"; }
+state running
+progress 1 "Updating package lists"
 
 TOTAL=0; DONE=0; FAILED=()
 
 say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 install_pkg() {
   DONE=$((DONE + 1))
+  progress $((8 + 88 * (DONE - 1) / TOTAL)) "Installing $1 ($DONE of $TOTAL)"
   printf '\033[0;90m[%d/%d]\033[0m %s ... ' "$DONE" "$TOTAL" "$1"
   if DEBIAN_FRONTEND=noninteractive pkg install -y "$1" >"$MARK/last-pkg.log" 2>&1; then
     printf '\033[0;32mok\033[0m\n'
@@ -20,7 +26,7 @@ install_pkg() {
 }
 
 # Core packages: the desktop will not start without these.
-CORE=(xorg-xrandr xkeyboard-config xfce4 xfce4-terminal thunar mousepad pulseaudio dbus)
+CORE=(procps xorg-xrandr xkeyboard-config xfce4 xfce4-terminal thunar mousepad pulseaudio dbus)
 GPU=(mesa-zink vulkan-loader-android)
 APPS=(firefox code-oss git wget curl)
 NET=(nmap netcat-openbsd whois dnsutils tracepath)
@@ -35,8 +41,10 @@ case "$GPU_VENDOR" in
 esac
 
 say "Updating package lists"
+progress 2 "Updating package lists"
 DEBIAN_FRONTEND=noninteractive pkg update -y
 DEBIAN_FRONTEND=noninteractive pkg upgrade -y
+progress 5 "Adding package repositories"
 for r in x11-repo tur-repo; do DEBIAN_FRONTEND=noninteractive pkg install -y "$r"; done
 DEBIAN_FRONTEND=noninteractive pkg update -y
 
@@ -46,6 +54,7 @@ TOTAL=${#ALL[@]}
 say "Installing desktop, GPU drivers, apps and tools ($TOTAL packages)"
 for p in "${ALL[@]}"; do install_pkg "$p"; done
 
+progress 96 "Finishing up"
 pip install requests beautifulsoup4 >/dev/null 2>&1
 
 # GPU acceleration profile (Zink over Turnip on Adreno, software Vulkan elsewhere)
@@ -72,13 +81,17 @@ chmod +x "$HOME"/Desktop/*.desktop 2>/dev/null
 for core in "${CORE[@]}"; do
   for f in "${FAILED[@]}"; do
     if [ "$f" = "$core" ]; then
-      say "Core package '$core' failed to install. Check your connection and re-run: linux-desktop"
+      say "Core package '$core' failed to install. Check your connection and try again."
+      progress 0 "Could not install $core. Check your internet connection and try again."
+      state failed
       exit 1
     fi
   done
 done
 
 touch "$MARK/installed-v1"
+progress 100 "Done"
+state done
 say "Setup complete"
 [ ${#FAILED[@]} -gt 0 ] && echo "Optional packages that failed (install later with pkg): ${FAILED[*]}"
 exit 0

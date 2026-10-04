@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 
+import androidx.core.content.ContextCompat;
+
 import com.termux.app.TermuxService;
 import com.termux.shared.file.FileUtils;
 import com.termux.shared.logger.Logger;
@@ -16,36 +18,90 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Starts the Linux desktop inside this app: writes the helper scripts into {@code $PREFIX/bin} and
- * runs {@code linux-desktop} in a terminal session. That script installs the desktop on first use,
- * starts the built-in X server ({@code com.termux.x11}) and XFCE, and brings the display to the front.
+ * Helpers to install and run the Linux desktop inside this app. The scripts are written into
+ * {@code $PREFIX/bin} and run as background Termux shells (no terminal is shown). {@code
+ * linux-desktop-setup} installs the desktop on first use and reports progress through files;
+ * {@code linux-desktop} starts the built-in X server ({@code com.termux.x11}) and XFCE.
  */
 public class DesktopLauncher {
-
-    public static final String EXTRA_START_DESKTOP = "com.termux.app.EXTRA_START_DESKTOP";
 
     private static final String LOG_TAG = "DesktopLauncher";
     private static final String ASSET_DIR = "desktop/";
     private static final String[] SCRIPTS = {"termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-stop"};
 
-    /** Must only be called once the Termux bootstrap is installed, i.e. {@code $PREFIX/bin/bash} exists. */
-    public static boolean start(Context context) {
-        if (!new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, "bash").exists()) {
-            Logger.logError(LOG_TAG, "Bootstrap is not installed yet");
-            return false;
-        }
-        if (!writeScripts(context)) return false;
+    private static final File STATE_DIR = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".config/linux-desktop");
+    private static final File INSTALLED_MARKER = new File(STATE_DIR, "installed-v1");
+    private static final File PROGRESS_FILE = new File(STATE_DIR, "progress");
+    private static final File STATE_FILE = new File(STATE_DIR, "state");
 
-        String executable = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/linux-desktop";
+    /** Setup progress as reported by {@code linux-desktop-setup}. */
+    public static class Progress {
+        public final int percent;
+        public final String message;
+        public final String state; // "running", "done", "failed" or "" if setup has not started
+        /** True if the progress file was updated recently, i.e. a setup shell is still alive. */
+        public final boolean active;
+
+        Progress(int percent, String message, String state, boolean active) {
+            this.percent = percent; this.message = message; this.state = state; this.active = active;
+        }
+    }
+
+    public static boolean isInstalled() {
+        return INSTALLED_MARKER.exists();
+    }
+
+    public static boolean isBootstrapInstalled() {
+        return new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, "bash").exists();
+    }
+
+    public static Progress readProgress() {
+        int percent = 0;
+        String message = "";
+        String[] parts = readFirstLine(PROGRESS_FILE).split("\\|", 2);
+        if (parts.length == 2) {
+            try { percent = Integer.parseInt(parts[0].trim()); } catch (NumberFormatException ignored) {}
+            message = parts[1];
+        }
+        boolean active = PROGRESS_FILE.exists() && System.currentTimeMillis() - PROGRESS_FILE.lastModified() < 10 * 60 * 1000;
+        return new Progress(percent, message, readFirstLine(STATE_FILE).trim(), active);
+    }
+
+    /** Forgets the result of an earlier setup attempt so a retry does not read stale "failed" state. */
+    public static void resetProgress() {
+        PROGRESS_FILE.delete();
+        STATE_FILE.delete();
+    }
+
+    /** Runs {@code linux-desktop-setup} in a background shell. Returns false if scripts could not be written. */
+    public static boolean startSetup(Context context) {
+        return writeScripts(context) && runInBackground(context, "linux-desktop-setup");
+    }
+
+    /** Runs {@code linux-desktop} (X server + XFCE) in a background shell. */
+    public static boolean startDesktop(Context context) {
+        return writeScripts(context) && runInBackground(context, "linux-desktop");
+    }
+
+    private static boolean runInBackground(Context context, String script) {
+        String executable = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/" + script;
         Intent intent = new Intent(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE,
             new Uri.Builder().scheme(TERMUX_SERVICE.URI_SCHEME_SERVICE_EXECUTE).path(executable).build());
         intent.setClass(context, TermuxService.class);
         intent.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, TermuxConstants.TERMUX_HOME_DIR_PATH);
-        intent.putExtra(TERMUX_SERVICE.EXTRA_SHELL_NAME, "Linux Desktop");
-        intent.putExtra(TERMUX_SERVICE.EXTRA_SESSION_ACTION,
-            Integer.toString(TERMUX_SERVICE.VALUE_EXTRA_SESSION_ACTION_SWITCH_TO_NEW_SESSION_AND_OPEN_ACTIVITY));
-        context.startService(intent);
+        intent.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, true);
+        intent.putExtra(TERMUX_SERVICE.EXTRA_COMMAND_LABEL, script);
+        ContextCompat.startForegroundService(context, intent);
         return true;
+    }
+
+    private static String readFirstLine(File file) {
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(file))) {
+            String line = reader.readLine();
+            return line == null ? "" : line;
+        } catch (IOException e) {
+            return "";
+        }
     }
 
     private static boolean writeScripts(Context context) {

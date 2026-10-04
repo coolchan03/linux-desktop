@@ -29,7 +29,6 @@ import android.widget.Toast;
 import com.termux.R;
 import com.termux.app.api.file.FileReceiverActivity;
 import com.termux.app.terminal.TermuxActivityRootView;
-import com.termux.app.desktop.DesktopLauncher;
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient;
 import com.termux.app.terminal.io.TermuxTerminalExtraKeys;
 import com.termux.shared.activities.ReportActivity;
@@ -405,7 +404,6 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
                             launchFailsafe = intent.getExtras().getBoolean(TERMUX_ACTIVITY.EXTRA_FAILSAFE_SESSION, false);
                         }
                         mTermuxTerminalSessionActivityClient.addNewSession(launchFailsafe, null);
-                        startDesktopIfRequested(intent);
                     } catch (WindowManager.BadTokenException e) {
                         // Activity finished - ignore.
                     }
@@ -425,24 +423,10 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             } else {
                 mTermuxTerminalSessionActivityClient.setCurrentSession(mTermuxTerminalSessionActivityClient.getCurrentStoredSessionOrLast());
             }
-            startDesktopIfRequested(intent);
         }
 
         // Update the {@link TerminalSession} and {@link TerminalEmulator} clients.
         mTermuxService.setTermuxTerminalSessionClient(mTermuxTerminalSessionActivityClient);
-    }
-
-    /** Starts the Linux desktop if this activity was opened from the "Linux Desktop" launcher icon. */
-    private void startDesktopIfRequested(@Nullable Intent intent) {
-        if (intent != null && intent.getBooleanExtra(DesktopLauncher.EXTRA_START_DESKTOP, false))
-            DesktopLauncher.start(this);
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        // Activity is already running (singleTask) and the desktop icon was tapped again.
-        if (mTermuxService != null) startDesktopIfRequested(intent);
     }
 
     @Override

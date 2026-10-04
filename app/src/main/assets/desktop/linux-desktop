@@ -1,11 +1,20 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Starts the Linux desktop and shows it in this app's built-in display.
 MARK="$HOME/.config/linux-desktop/installed-v1"
+# When started by the app (no terminal), keep a log for troubleshooting.
+[ -t 1 ] || exec >>"$HOME/.config/linux-desktop/desktop.log" 2>&1
 
 if [ ! -f "$MARK" ]; then
   echo "First launch: installing your Linux desktop. This takes 15-30 minutes and needs internet."
-  linux-desktop-setup || { echo "Setup did not finish. Press Enter to close."; read -r; exit 1; }
+  linux-desktop-setup || { echo "Setup did not finish."; exit 1; }
 fi
+
+# Already running (e.g. the icon was tapped again): the app just reopens the display.
+PIDFILE="$HOME/.config/linux-desktop/desktop.pid"
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  exit 0
+fi
+echo $$ > "$PIDFILE"
 
 source "$HOME/.config/hacklab-gpu.sh" 2>/dev/null
 
