@@ -28,6 +28,9 @@ pulseaudio --start --exit-idle-time=-1
 pactl load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1 auth-anonymous=1 2>/dev/null
 export PULSE_SERVER=127.0.0.1
 
+# Apps and tools install in the background so the desktop appears as soon as the core is ready.
+(linux-desktop-extras >/dev/null 2>&1 &)
+
 termux-x11 :0 -ac &
 sleep 2
 export DISPLAY=:0

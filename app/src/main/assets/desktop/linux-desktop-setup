@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# One-time installer for the Linux desktop (XFCE4, GPU drivers, audio, apps, security tools).
+# Installs the core of the Linux desktop: XFCE4, audio and GPU acceleration. This is the part needed to
+# see a working desktop, so it is kept small; apps and tools follow in the background (linux-desktop-extras).
 # Package selection follows https://github.com/techjarves/termux-hacklab (Mobile HackLab).
-# The X server itself is built into this app, so no separate Termux:X11 app or package is needed.
 
 MARK="$HOME/.config/linux-desktop"
 mkdir -p "$MARK"
@@ -16,46 +16,42 @@ TOTAL=0; DONE=0; FAILED=()
 say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 install_pkg() {
   DONE=$((DONE + 1))
-  progress $((8 + 88 * (DONE - 1) / TOTAL)) "Installing $1 ($DONE of $TOTAL)"
+  progress $((10 + 85 * (DONE - 1) / TOTAL)) "Installing $1 ($DONE of $TOTAL)"
   printf '\033[0;90m[%d/%d]\033[0m %s ... ' "$DONE" "$TOTAL" "$1"
-  if DEBIAN_FRONTEND=noninteractive pkg install -y "$1" >"$MARK/last-pkg.log" 2>&1; then
-    printf '\033[0;32mok\033[0m\n'
-  else
-    printf '\033[0;31mfailed\033[0m\n'; FAILED+=("$1")
-  fi
+  for attempt in 1 2; do
+    if DEBIAN_FRONTEND=noninteractive pkg install -y "$1" >"$MARK/last-pkg.log" 2>&1; then
+      printf '\033[0;32mok\033[0m\n'; return 0
+    fi
+    sleep 2
+  done
+  printf '\033[0;31mfailed\033[0m\n'
+  cp "$MARK/last-pkg.log" "$MARK/failed-$1.log"
+  FAILED+=("$1")
 }
 
 # Core packages: the desktop will not start without these.
-CORE=(procps xorg-xrandr xkeyboard-config xfce4 xfce4-terminal thunar mousepad pulseaudio dbus)
-GPU=(mesa-zink vulkan-loader-android)
-APPS=(firefox code-oss git wget curl)
-NET=(nmap netcat-openbsd whois dnsutils tracepath)
-SEC=(hydra john sqlmap)
-WINE=()
-[ "$(uname -m)" = aarch64 ] && WINE=(hangover-wine hangover-wowbox64)
-
-GPU_VENDOR="$(getprop ro.hardware.egl 2>/dev/null)"
-case "$GPU_VENDOR" in
-  *adreno*) GPU+=(mesa-vulkan-icd-freedreno) ;;
-  *)        GPU+=(mesa-vulkan-icd-swrast) ;;
+CORE=(procps xorg-xrandr xkeyboard-config xfce4 xfce4-terminal thunar mousepad pulseaudio dbus mesa-zink vulkan-loader-android)
+case "$(getprop ro.hardware.egl 2>/dev/null)" in
+  *adreno*) CORE+=(mesa-vulkan-icd-freedreno) ;;
+  *)        CORE+=(mesa-vulkan-icd-swrast) ;;
 esac
 
 say "Updating package lists"
-progress 2 "Updating package lists"
 DEBIAN_FRONTEND=noninteractive pkg update -y
-DEBIAN_FRONTEND=noninteractive pkg upgrade -y
 progress 5 "Adding package repositories"
 for r in x11-repo tur-repo; do DEBIAN_FRONTEND=noninteractive pkg install -y "$r"; done
 DEBIAN_FRONTEND=noninteractive pkg update -y
 
-ALL=("${CORE[@]}" "${GPU[@]}" "${APPS[@]}" "${NET[@]}" "${SEC[@]}" "${WINE[@]}")
-TOTAL=${#ALL[@]}
+TOTAL=${#CORE[@]}
+say "Installing the desktop ($TOTAL packages)"
+for p in "${CORE[@]}"; do install_pkg "$p"; done
 
-say "Installing desktop, GPU drivers, apps and tools ($TOTAL packages)"
-for p in "${ALL[@]}"; do install_pkg "$p"; done
-
-progress 96 "Finishing up"
-pip install requests beautifulsoup4 >/dev/null 2>&1
+if [ ${#FAILED[@]} -gt 0 ]; then
+  say "Could not install: ${FAILED[*]}"
+  progress 0 "Could not install ${FAILED[0]}. Check your internet connection and try again."
+  state failed
+  exit 1
+fi
 
 # GPU acceleration profile (Zink over Turnip on Adreno, software Vulkan elsewhere)
 cat > "$HOME/.config/hacklab-gpu.sh" <<'EOF'
@@ -69,29 +65,11 @@ export MESA_VK_WSI_PRESENT_MODE=immediate
 export ZINK_DESCRIPTORS=lazy
 EOF
 
-# Desktop shortcuts
 mkdir -p "$HOME/Desktop"
-mk() { printf '[Desktop Entry]\nName=%s\nExec=%s\nIcon=%s\nType=Application\nCategories=%s;\n' "$1" "$2" "$3" "$4" > "$HOME/Desktop/$1.desktop"; }
-mk Firefox "firefox" firefox "Network;WebBrowser"
-mk "VS Code" "code-oss --no-sandbox" code-oss "Development"
-mk Terminal "xfce4-terminal" utilities-terminal "System;TerminalEmulator"
-[ ${#WINE[@]} -gt 0 ] && mk "Wine Config" "wine winecfg" wine "Settings"
+printf '[Desktop Entry]\nName=Terminal\nExec=xfce4-terminal\nIcon=utilities-terminal\nType=Application\nCategories=System;TerminalEmulator;\n' > "$HOME/Desktop/Terminal.desktop"
 chmod +x "$HOME"/Desktop/*.desktop 2>/dev/null
-
-for core in "${CORE[@]}"; do
-  for f in "${FAILED[@]}"; do
-    if [ "$f" = "$core" ]; then
-      say "Core package '$core' failed to install. Check your connection and try again."
-      progress 0 "Could not install $core. Check your internet connection and try again."
-      state failed
-      exit 1
-    fi
-  done
-done
 
 touch "$MARK/installed-v1"
 progress 100 "Done"
 state done
-say "Setup complete"
-[ ${#FAILED[@]} -gt 0 ] && echo "Optional packages that failed (install later with pkg): ${FAILED[*]}"
 exit 0

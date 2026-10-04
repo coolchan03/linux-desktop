@@ -3,6 +3,7 @@ package com.termux.app.desktop;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 
 import androidx.core.content.ContextCompat;
 
@@ -27,12 +28,13 @@ public class DesktopLauncher {
 
     private static final String LOG_TAG = "DesktopLauncher";
     private static final String ASSET_DIR = "desktop/";
-    private static final String[] SCRIPTS = {"termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-stop"};
+    private static final String[] SCRIPTS = {"termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-stop"};
 
     private static final File STATE_DIR = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".config/linux-desktop");
     private static final File INSTALLED_MARKER = new File(STATE_DIR, "installed-v1");
     private static final File PROGRESS_FILE = new File(STATE_DIR, "progress");
     private static final File STATE_FILE = new File(STATE_DIR, "state");
+    private static final File PRESET_FILE = new File(STATE_DIR, "preset");
 
     /** Setup progress as reported by {@code linux-desktop-setup}. */
     public static class Progress {
@@ -65,6 +67,94 @@ public class DesktopLauncher {
         }
         boolean active = PROGRESS_FILE.exists() && System.currentTimeMillis() - PROGRESS_FILE.lastModified() < 10 * 60 * 1000;
         return new Progress(percent, message, readFirstLine(STATE_FILE).trim(), active);
+    }
+
+
+    /** What to install in the background once the desktop is running. */
+    public enum Preset {
+        MINIMAL("minimal", "Minimal", "Desktop only. Add apps later with pkg."),
+        STANDARD("standard", "Standard", "Desktop + Firefox, VS Code, git."),
+        FULL("full", "Full", "Standard + security tools (nmap, hydra, sqlmap...) and Windows apps (Wine).");
+
+        public final String id, title, description;
+        Preset(String id, String title, String description) { this.id = id; this.title = title; this.description = description; }
+    }
+
+    public static void writePreset(Preset preset) {
+        writeStateFile(PRESET_FILE, preset.id + "\n");
+    }
+
+    private static void writeStateFile(File file, String text) {
+        try {
+            if (!STATE_DIR.isDirectory() && !STATE_DIR.mkdirs()) return;
+            writeFile(file, text);
+        } catch (IOException e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "Failed to write " + file, e);
+        }
+    }
+
+    /** Asks the running Termux to stop the X server, XFCE and audio. */
+    public static void stopDesktop(Context context) {
+        if (isBootstrapInstalled() && writeScripts(context)) runInBackground(context, "linux-desktop-stop");
+    }
+
+    /**
+     * Preferences for a phone: scaled-down resolution (so XFCE is readable), fullscreen, cutout hidden.
+     * Only written once, so changes made in the display settings later are kept.
+     */
+    @SuppressWarnings("deprecation")
+    public static void applyDisplayDefaults(Context context) {
+        android.content.SharedPreferences flags = context.getSharedPreferences("desktop_launcher", Context.MODE_PRIVATE);
+        if (flags.getBoolean("display_defaults_applied", false)) return;
+        android.preference.PreferenceManager.getDefaultSharedPreferences(context).edit()
+            .putString("displayResolutionMode", "scaled")
+            .putInt("displayScale", 60)
+            .putBoolean("fullscreen", true)
+            .putBoolean("hideCutout", true)
+            .putString("screenIdleTimeout", "never")
+            .apply();
+        flags.edit().putBoolean("display_defaults_applied", true).apply();
+    }
+
+    /** Everything useful for diagnosing a failed install or a black display, as plain text. */
+    public static String collectDebugInfo(Context context) {
+        StringBuilder out = new StringBuilder();
+        String version = "?";
+        try { version = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName; }
+        catch (Exception ignored) {}
+        out.append("Linux Desktop ").append(version).append(" (").append(context.getPackageName()).append(")\n")
+            .append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(", Android ").append(Build.VERSION.RELEASE)
+            .append(" (SDK ").append(Build.VERSION.SDK_INT).append("), ").append(Build.SUPPORTED_ABIS[0]).append('\n')
+            .append("bootstrap installed: ").append(isBootstrapInstalled())
+            .append(", desktop installed: ").append(isInstalled()).append('\n');
+        Progress p = readProgress();
+        out.append("setup state: ").append(p.state).append(" ").append(p.percent).append("% ").append(p.message).append('\n');
+        out.append("preset: ").append(readFirstLine(PRESET_FILE)).append('\n');
+        out.append("extras: ").append(readFirstLine(new File(STATE_DIR, "extras-state"))).append(" / ")
+            .append(readFirstLine(new File(STATE_DIR, "extras-progress"))).append('\n');
+        appendTail(out, "desktop.log", new File(STATE_DIR, "desktop.log"), 40);
+        File[] failed = STATE_DIR.listFiles((dir, name) -> name.startsWith("failed-") && name.endsWith(".log"));
+        if (failed != null && failed.length > 0) {
+            java.util.Arrays.sort(failed, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            appendTail(out, failed[0].getName(), failed[0], 40);
+        }
+        return out.toString();
+    }
+
+    private static void appendTail(StringBuilder out, String title, File file, int lines) {
+        out.append("\n--- ").append(title).append(" (last ").append(lines).append(" lines) ---\n");
+        java.util.ArrayDeque<String> tail = new java.util.ArrayDeque<>();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                tail.addLast(line);
+                if (tail.size() > lines) tail.removeFirst();
+            }
+        } catch (IOException e) {
+            out.append("(not found)\n");
+            return;
+        }
+        for (String line : tail) out.append(line).append('\n');
     }
 
     /** Forgets the result of an earlier setup attempt so a retry does not read stale "failed" state. */
