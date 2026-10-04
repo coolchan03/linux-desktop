@@ -17,7 +17,18 @@ NEW_SUB="/data/\1/$NEW_PKG"
 
 relocate_deb() {
     deb=$1
-    tmp=$(mktemp -d "${TMPDIR:-@PREFIX@/tmp}/relocate.XXXXXX") || return 0
+    base="${TMPDIR:-@PREFIX@/tmp}"
+
+    # Unpacking and repacking needs a few times the package size. Fail clearly instead of
+    # filling the storage and leaving a half-installed package.
+    size_kb=$(( $(wc -c < "$deb") / 1024 ))
+    free_kb=$(df -Pk "$base" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -n "$free_kb" ] && [ "$free_kb" -lt $(( size_kb * 5 + 100000 )) ]; then
+        echo "lxdesk: not enough free storage to prepare $(basename "$deb") (need about $(( (size_kb * 5 + 100000) / 1024 )) MB, have $(( free_kb / 1024 )) MB)." >&2
+        return 1
+    fi
+
+    tmp=$(mktemp -d "$base/relocate.XXXXXX") || return 0
     tree="$tmp/tree"
 
     if dpkg-deb -R "$deb" "$tree" 2>/dev/null; then
@@ -47,16 +58,19 @@ relocate_deb() {
 
         if dpkg-deb -Znone --root-owner-group -b "$tree" "$tmp/new.deb" >/dev/null 2>&1 ||
            dpkg-deb -Znone -b "$tree" "$tmp/new.deb" >/dev/null 2>&1; then
-            cat "$tmp/new.deb" > "$deb"
+            rm -rf "$tree"                      # free the unpacked copy before replacing the deb
+            mv -f "$tmp/new.deb" "$deb" 2>/dev/null || cat "$tmp/new.deb" > "$deb"
         fi
     fi
 
     rm -rf "$tmp"
+    return 0
 }
 
+status=0
 while IFS= read -r line; do
     case $line in
-        *.deb) [ -f "$line" ] && relocate_deb "$line" ;;
+        *.deb) [ -f "$line" ] && { relocate_deb "$line" || status=1; } ;;
     esac
 done
-exit 0
+exit $status

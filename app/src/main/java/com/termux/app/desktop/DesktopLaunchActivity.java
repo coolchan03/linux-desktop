@@ -14,7 +14,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
 import android.os.Looper;
+import android.os.StatFs;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -275,17 +278,45 @@ public class DesktopLaunchActivity extends Activity {
         if ("running".equals(p.state) && p.active) {
             runSetup(); // reopened while an earlier setup shell is still running: keep watching it
         } else {
-            setStatus("What should be installed on top of the desktop? Apps install in the background, so you can start using the desktop right after the first few minutes.", 0);
+            setStatus("What should be installed on top of the desktop? Apps install in the background, so you can start using the desktop right after the first few minutes.\n\n"
+                + "Free storage: " + String.format(java.util.Locale.US, "%.1f", freeStorageGb()) + " GB. Roughly needed: Minimal 3 GB, Standard 5 GB, Full 9 GB.\n"
+                + (hasInternet() ? "Wi-Fi is recommended; the download is large." : "No internet connection detected. Connect before installing."), 0);
             mBar.setVisibility(View.GONE);
             mPresets.setVisibility(View.VISIBLE);
             mInstall.setVisibility(View.VISIBLE);
         }
     }
 
+    private double freeStorageGb() {
+        try {
+            return new StatFs(getFilesDir().getPath()).getAvailableBytes() / 1e9;
+        } catch (Exception e) {
+            return Double.MAX_VALUE; // unknown: do not block
+        }
+    }
+
+    private boolean hasInternet() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null || cm.getActiveNetwork() == null) return false;
+        NetworkCapabilities caps = cm.getNetworkCapabilities(cm.getActiveNetwork());
+        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+    }
+
     private void runSetup() {
         mBar.setVisibility(View.VISIBLE);
         DesktopLauncher.Progress p = DesktopLauncher.readProgress();
         boolean alreadyRunning = "running".equals(p.state) && p.active;
+        if (!alreadyRunning && !hasInternet()) {
+            setStatus("No internet connection. Connect to Wi-Fi or mobile data, then tap Try again.", 0);
+            mRetry.setVisibility(View.VISIBLE);
+            return;
+        }
+        if (!alreadyRunning && freeStorageGb() < 3.0) {
+            setStatus("Not enough free storage (" + String.format(java.util.Locale.US, "%.1f", freeStorageGb())
+                + " GB). Free up at least 3 GB, then tap Try again.", 0);
+            mRetry.setVisibility(View.VISIBLE);
+            return;
+        }
         if (!alreadyRunning) {
             setStatus("Installing the desktop. This takes about 5-10 minutes and needs internet.", 0);
             DesktopLauncher.resetProgress();

@@ -65,7 +65,7 @@ public class DesktopLauncher {
             try { percent = Integer.parseInt(parts[0].trim()); } catch (NumberFormatException ignored) {}
             message = parts[1];
         }
-        boolean active = PROGRESS_FILE.exists() && System.currentTimeMillis() - PROGRESS_FILE.lastModified() < 10 * 60 * 1000;
+        boolean active = PROGRESS_FILE.exists() && System.currentTimeMillis() - PROGRESS_FILE.lastModified() < 30 * 60 * 1000;
         return new Progress(percent, message, readFirstLine(STATE_FILE).trim(), active);
     }
 
