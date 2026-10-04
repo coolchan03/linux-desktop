@@ -1,10 +1,12 @@
 name: Build
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
       - 'github-releases/**'
+      - 'claude/**'
   pull_request:
     branches:
       - master
@@ -15,11 +17,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package_variant: [ apt-android-7, apt-android-5 ]
+        package_variant: [ apt-android-7 ] # apt-android-5 is for Android 5/6, which the embedded Termux:X11 (minSdk 24) does not support
 
     steps:
       - name: Clone repository
         uses: actions/checkout@v6
+
+      - name: Fetch Termux:X11 source submodules
+        run: git submodule update --init --recursive --jobs 8 --depth 1
 
       - name: Setup java 17
         uses: actions/setup-java@v5

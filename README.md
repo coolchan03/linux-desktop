@@ -1,3 +1,17 @@
+# Linux Desktop for Android (Termux + Termux:X11 + HackLab in one app)
+
+This fork merges three projects into a single APK so you tap one icon and get a Linux desktop:
+
+- [termux-app](https://github.com/termux/termux-app): the terminal and Linux userland (this repository's base).
+- [termux-x11](https://github.com/termux/termux-x11): the X server and display, built in as the `:lorie` module instead of a second app.
+- [termux-hacklab](https://github.com/techjarves/termux-hacklab): the package selection (XFCE4, Turnip/Zink GPU drivers, audio, Firefox, VS Code, security tools, Wine) installed on first launch.
+
+**Usage:** open **Linux Desktop**. On first launch it sets up Termux, asks for permissions (camera, microphone, location, notifications, Bluetooth, media, all-files access), installs the desktop (15-30 minutes, needs internet), then starts XFCE and shows it in the built-in display. Later launches go straight to the desktop. The normal **Termux** icon still opens the plain terminal. `linux-desktop-stop` stops the desktop.
+
+**Building:** the X server sources are git submodules (`git submodule update --init --recursive`). The GitHub Actions workflow builds the APK and attaches it as an artifact. Requires Android 7+ (minSdk 24).
+
+---
+
 # Termux application
 
 [![Build status](https://github.com/termux/termux-app/workflows/Build/badge.svg)](https://github.com/termux/termux-app/actions)

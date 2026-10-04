@@ -1,0 +1,29 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Starts the Linux desktop and shows it in this app's built-in display.
+MARK="$HOME/.config/linux-desktop/installed-v1"
+
+if [ ! -f "$MARK" ]; then
+  echo "First launch: installing your Linux desktop. This takes 15-30 minutes and needs internet."
+  linux-desktop-setup || { echo "Setup did not finish. Press Enter to close."; read -r; exit 1; }
+fi
+
+source "$HOME/.config/hacklab-gpu.sh" 2>/dev/null
+
+pkill -f "termux-x11" 2>/dev/null
+pkill -f "xfce" 2>/dev/null
+pulseaudio --kill 2>/dev/null
+sleep 0.5
+
+unset PULSE_SERVER
+pulseaudio --start --exit-idle-time=-1
+pactl load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1 auth-anonymous=1 2>/dev/null
+export PULSE_SERVER=127.0.0.1
+
+termux-x11 :0 -ac &
+sleep 2
+export DISPLAY=:0
+
+# Bring the built-in display to the front.
+am start --user 0 -n com.termux/com.termux.x11.MainActivity >/dev/null 2>&1
+
+exec dbus-launch --exit-with-session startxfce4

@@ -1,0 +1,3 @@
+#!/data/data/com.termux/files/usr/bin/bash
+pkill -f "termux-x11"; pkill -f xfce; pkill -f pulseaudio; pkill -f dbus-daemon
+echo "Desktop stopped."
