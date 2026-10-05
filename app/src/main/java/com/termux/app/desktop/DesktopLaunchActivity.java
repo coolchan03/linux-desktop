@@ -54,9 +54,12 @@ public class DesktopLaunchActivity extends Activity {
 
     /** Sent by the "Stop desktop" shortcut. */
     public static final String ACTION_STOP_DESKTOP = "com.termux.app.desktop.STOP_DESKTOP";
+    /** Sent by the "Storage location" shortcut. */
+    public static final String ACTION_DATA_FOLDER = "com.termux.app.desktop.DATA_FOLDER";
 
     private static final int REQUEST_RUNTIME_PERMISSIONS = 4100;
     private static final int REQUEST_ALL_FILES_ACCESS = 4101;
+    private static final int REQUEST_PICK_FOLDER = 4102;
     private static final String PREFS = "desktop_launcher";
     private static final String KEY_PERMISSIONS_ASKED = "permissions_asked";
     private static final String KEY_KEEP_ALIVE_ASKED = "keep_alive_asked";
@@ -93,6 +96,10 @@ public class DesktopLaunchActivity extends Activity {
     private boolean mSetupFinishedInBackground;
     private Step mStep = Step.PREPARE;
     private Runnable mRetryAction;
+    private LinearLayout mSteps;
+    private LinearLayout mStorageBox;
+    private TextView mStorageText;
+    private boolean mSettingsMode;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -106,6 +113,11 @@ public class DesktopLaunchActivity extends Activity {
         }
 
         buildUi();
+
+        if (ACTION_DATA_FOLDER.equals(getIntent().getAction())) {
+            showStorageSettings();
+            return;
+        }
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         if (prefs.getBoolean(KEY_PERMISSIONS_ASKED, false)) {
@@ -133,6 +145,8 @@ public class DesktopLaunchActivity extends Activity {
         if (ACTION_STOP_DESKTOP.equals(intent.getAction())) {
             DesktopLauncher.stopDesktop(this);
             Toast.makeText(this, "Desktop stopped", Toast.LENGTH_SHORT).show();
+        } else if (ACTION_DATA_FOLDER.equals(intent.getAction())) {
+            showStorageSettings();
         }
     }
 
@@ -200,7 +214,16 @@ public class DesktopLaunchActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_ALL_FILES_ACCESS) begin();
+        if (requestCode == REQUEST_ALL_FILES_ACCESS) {
+            if (mSettingsMode) renderStorage(); else begin();
+        } else if (requestCode == REQUEST_PICK_FOLDER && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            String path = DesktopLauncher.pathFromTreeUri(data.getData());
+            if (path == null) {
+                Toast.makeText(this, "Please pick a folder on your phone or SD card, not a cloud drive.", Toast.LENGTH_LONG).show();
+            } else {
+                chooseDataDir(path);
+            }
+        }
     }
 
     // ---- UI ----
@@ -260,6 +283,7 @@ public class DesktopLaunchActivity extends Activity {
         content.addView(subtitle);
 
         LinearLayout steps = new LinearLayout(this);
+        mSteps = steps;
         steps.setOrientation(LinearLayout.VERTICAL);
         steps.setPadding(dp(8), dp(28), dp(8), dp(20));
         for (Step step : Step.values()) {
@@ -302,6 +326,48 @@ public class DesktopLaunchActivity extends Activity {
             if (preset == DesktopLauncher.Preset.STANDARD) choice.setChecked(true);
         }
         content.addView(mPresets, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        mStorageBox = new LinearLayout(this);
+        mStorageBox.setOrientation(LinearLayout.VERTICAL);
+        mStorageBox.setVisibility(View.GONE);
+        mStorageBox.setPadding(0, dp(20), 0, 0);
+        TextView storageTitle = text("Where your files are stored", 15, COLOR_TEXT);
+        storageTitle.setTypeface(storageTitle.getTypeface(), android.graphics.Typeface.BOLD);
+        mStorageBox.addView(storageTitle);
+        mStorageText = text("", 14, COLOR_MUTED);
+        mStorageText.setPadding(0, dp(4), 0, dp(8));
+        mStorageBox.addView(mStorageText);
+        TextView storageNote = text("The Linux system itself always stays on internal storage (programs cannot run from an SD card). "
+            + "Your own files (Documents, Downloads, Pictures, Music, Videos, Projects) can live on the card.", 12, COLOR_MUTED);
+        storageNote.setPadding(0, 0, 0, dp(8));
+        mStorageBox.addView(storageNote);
+        LinearLayout storageButtons = new LinearLayout(this);
+        storageButtons.setOrientation(LinearLayout.VERTICAL);
+        Button internal = button("Internal storage", false);
+        internal.setOnClickListener(v -> chooseDataDir(""));
+        Button sd = button("SD card", false);
+        sd.setTag("sd");
+        sd.setOnClickListener(v -> {
+            java.util.List<DesktopLauncher.Volume> volumes = DesktopLauncher.removableVolumes(this);
+            if (volumes.isEmpty()) {
+                Toast.makeText(this, "No SD card found. Use \"Choose folder\" instead.", Toast.LENGTH_LONG).show();
+            } else {
+                chooseDataDir(volumes.get(0).path + "/LinuxDesktop");
+            }
+        });
+        Button pick = button("Choose folder...", false);
+        pick.setOnClickListener(v -> {
+            try {
+                startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQUEST_PICK_FOLDER);
+            } catch (Exception e) {
+                Toast.makeText(this, "This phone has no folder picker.", Toast.LENGTH_LONG).show();
+            }
+        });
+        storageButtons.addView(internal);
+        storageButtons.addView(sd);
+        storageButtons.addView(pick);
+        mStorageBox.addView(storageButtons);
+        content.addView(mStorageBox, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         mInstall = button("Install", true);
         mInstall.setVisibility(View.GONE);
@@ -439,7 +505,86 @@ public class DesktopLaunchActivity extends Activity {
             + (hasInternet() ? "Wi-Fi is recommended; the download is large." : "No internet connection detected. Connect before installing."));
         mBar.setVisibility(View.GONE);
         mPresets.setVisibility(View.VISIBLE);
+        renderStorage();
+        mStorageBox.setVisibility(View.VISIBLE);
         mInstall.setVisibility(View.VISIBLE);
+    }
+
+    // ---- Where your files are stored ----
+
+    private void renderStorage() {
+        String dir = DesktopLauncher.readDataDir();
+        mStorageText.setText(dir.isEmpty() ? "Internal storage (default)" : dir);
+    }
+
+    /** "" means internal storage. The files are moved once the desktop is installed (or right away from the shortcut). */
+    private void chooseDataDir(String path) {
+        DesktopLauncher.writeDataDir(path);
+        renderStorage();
+        if (!path.isEmpty() && Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+            new AlertDialog.Builder(this)
+                .setTitle("All-files access needed")
+                .setMessage("To store files on the SD card or in another folder, this app needs \"All files access\". Turn it on on the next screen.")
+                .setPositiveButton("Continue", (d, w) -> {
+                    try {
+                        startActivityForResult(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            Uri.parse("package:" + getPackageName())), REQUEST_ALL_FILES_ACCESS);
+                    } catch (Exception ignored) {}
+                })
+                .setNegativeButton("Not now", null)
+                .show();
+        }
+    }
+
+    /** Opened from the "Storage location" shortcut: change the folder after the desktop is set up. */
+    private void showStorageSettings() {
+        mSettingsMode = true;
+        mBegun = true; // never start the install flow from here
+        mSteps.setVisibility(View.GONE);
+        mBar.setVisibility(View.GONE);
+        mPresets.setVisibility(View.GONE);
+        mRetry.setVisibility(View.GONE);
+        mHeadline.setTextColor(COLOR_TEXT);
+        mHeadline.setText("Storage location");
+        mDetail.setText("Choose where Documents, Downloads, Pictures, Music, Videos and Projects are kept. Your files are copied over; nothing is deleted from the old place.");
+        renderStorage();
+        mStorageBox.setVisibility(View.VISIBLE);
+        mInstall.setText("Save");
+        mInstall.setVisibility(View.VISIBLE);
+        mInstall.setOnClickListener(v -> {
+            if (!DesktopLauncher.isBootstrapInstalled()) {
+                Toast.makeText(this, "Finish the desktop setup first.", Toast.LENGTH_LONG).show();
+            } else if (!DesktopLauncher.dataDirNeedsApplying()) {
+                finish();
+            } else if (DesktopLauncher.applyDataDir(this)) {
+                mInstall.setVisibility(View.GONE);
+                mHeadline.setText("Moving your files");
+                mDetail.setText("Please wait. Large folders can take a while; you can leave this screen and it continues.");
+                mBar.setVisibility(View.VISIBLE);
+                mBar.setIndeterminate(true);
+                pollDataMove();
+            }
+        });
+    }
+
+    private void pollDataMove() {
+        if (isFinishing() || isDestroyed()) return;
+        String state = DesktopLauncher.readDataState();
+        if (state.startsWith("done|")) {
+            mBar.setVisibility(View.GONE);
+            mHeadline.setText("Done");
+            mDetail.setText(state.substring(5));
+            mHandler.postDelayed(this::finish, 1800);
+        } else if (state.startsWith("failed|")) {
+            mBar.setVisibility(View.GONE);
+            mHeadline.setTextColor(COLOR_ERROR);
+            mHeadline.setText("Could not move your files");
+            mDetail.setText(state.substring(7));
+            mInstall.setText("Try again");
+            mInstall.setVisibility(View.VISIBLE);
+        } else {
+            mHandler.postDelayed(this::pollDataMove, 700);
+        }
     }
 
     private double freeStorageGb() {
@@ -499,6 +644,27 @@ public class DesktopLaunchActivity extends Activity {
     }
 
     private void afterSetup() {
+        if (DesktopLauncher.dataDirUnavailable()) {
+            // The chosen folder (for example an SD card) cannot be reached right now.
+            new AlertDialog.Builder(this)
+                .setTitle("Storage folder not available")
+                .setMessage("Your files are set to be stored in " + DesktopLauncher.readDataDir()
+                    + ", but it cannot be reached. Insert the SD card, or use internal storage for now.")
+                .setPositiveButton("Use internal storage", (d, w) -> {
+                    DesktopLauncher.writeDataDir("");
+                    DesktopLauncher.applyDataDir(this);
+                    continueAfterSetup();
+                })
+                .setNegativeButton("Start anyway", (d, w) -> continueAfterSetup())
+                .setOnCancelListener(d -> continueAfterSetup())
+                .show();
+            return;
+        }
+        if (DesktopLauncher.dataDirNeedsApplying()) DesktopLauncher.applyDataDir(this);
+        continueAfterSetup();
+    }
+
+    private void continueAfterSetup() {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         if (!prefs.getBoolean(KEY_KEEP_ALIVE_ASKED, false)) {
             prefs.edit().putBoolean(KEY_KEEP_ALIVE_ASKED, true).apply();

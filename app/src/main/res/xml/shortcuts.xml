@@ -24,18 +24,15 @@
     </shortcut>
 
     <shortcut
-        android:shortcutId="new_failsafe_session"
+        android:shortcutId="data_folder"
         android:enabled="true"
-        android:icon="@drawable/ic_new_session"
-        android:shortcutShortLabel="@string/action_new_session_failsafe"
+        android:icon="@drawable/ic_settings"
+        android:shortcutShortLabel="@string/action_data_folder"
         tools:targetApi="n_mr1">
         <intent
-            android:action="android.intent.action.RUN"
+            android:action="com.termux.app.desktop.DATA_FOLDER"
             android:targetPackage="com.lxdesk"
-            android:targetClass="com.termux.app.TermuxActivity"
-            android:name="android.shortcut.conversation">
-            <extra android:name="com.termux.app.failsafe_session" android:value="true"/>
-        </intent>
+            android:targetClass="com.termux.app.desktop.DesktopLaunchActivity" />
     </shortcut>
 
     <shortcut

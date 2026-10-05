@@ -1,0 +1,58 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Keeps your own files (Documents, Downloads, Pictures, Music, Videos, Projects) on an SD card or another
+# shared-storage folder. The Linux system itself must stay on internal storage: programs cannot run from
+# SD cards, and they cannot hold the symlinks and permissions Linux needs.
+#
+# The target folder is read from ~/.config/linux-desktop/datadir. Empty means internal storage.
+# Existing files are copied first; nothing is deleted until the copy has succeeded, and data left on the
+# previous location is never removed.
+
+MARK="$HOME/.config/linux-desktop"
+mkdir -p "$MARK"
+TARGET="$(cat "$MARK/datadir" 2>/dev/null)"
+DIRS=(Documents Downloads Music Pictures Projects Videos)
+status() { echo "$1|$2" > "$MARK/data-state"; }
+
+fail() {
+  echo "$*" >&2
+  status failed "$*"
+  exit 1
+}
+
+status running "Moving your files"
+
+if [ -n "$TARGET" ]; then
+  mkdir -p "$TARGET" 2>/dev/null
+  [ -d "$TARGET" ] && [ -w "$TARGET" ] || fail "Cannot write to $TARGET. Check that the card is inserted and that this app has all-files access."
+fi
+
+for d in "${DIRS[@]}"; do
+  src="$HOME/$d"
+  current=""
+  [ -L "$src" ] && current="$(readlink "$src")"
+
+  if [ -n "$TARGET" ]; then
+    dst="$TARGET/$d"
+    [ "$current" = "$dst" ] && continue
+    mkdir -p "$dst" || fail "Cannot create $dst"
+    if [ -L "$src" ]; then
+      # Was stored somewhere else before: copy it across, leave the old copy alone.
+      [ -d "$current" ] && { cp -r "$current/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"; }
+      rm -f "$src"
+    elif [ -d "$src" ]; then
+      cp -r "$src/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
+      rm -rf "$src"
+    fi
+    ln -s "$dst" "$src" || fail "Could not link $src"
+  else
+    # Back to internal storage.
+    [ -L "$src" ] || { mkdir -p "$src"; continue; }
+    rm -f "$src"
+    mkdir -p "$src"
+    [ -d "$current" ] && cp -r "$current/." "$src/" 2>/dev/null
+  fi
+done
+
+echo "$TARGET" > "$MARK/datadir-applied"
+status done "Your files are now stored in ${TARGET:-internal storage}"
+exit 0

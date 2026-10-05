@@ -28,13 +28,16 @@ public class DesktopLauncher {
 
     private static final String LOG_TAG = "DesktopLauncher";
     private static final String ASSET_DIR = "desktop/";
-    private static final String[] SCRIPTS = {"termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-stop"};
+    private static final String[] SCRIPTS = {"termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-stop"};
 
     private static final File STATE_DIR = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".config/linux-desktop");
     private static final File INSTALLED_MARKER = new File(STATE_DIR, "installed-v1");
     private static final File PROGRESS_FILE = new File(STATE_DIR, "progress");
     private static final File STATE_FILE = new File(STATE_DIR, "state");
     private static final File PRESET_FILE = new File(STATE_DIR, "preset");
+    private static final File DATA_DIR_FILE = new File(STATE_DIR, "datadir");
+    private static final File DATA_APPLIED_FILE = new File(STATE_DIR, "datadir-applied");
+    private static final File DATA_STATE_FILE = new File(STATE_DIR, "data-state");
 
     /** Setup progress as reported by {@code linux-desktop-setup}. */
     public static class Progress {
@@ -116,6 +119,88 @@ public class DesktopLauncher {
         flags.edit().putBoolean("display_defaults_applied", true).apply();
     }
 
+
+    // ---- Where your own files are stored ----
+
+    /** A mounted SD card or other removable volume. */
+    public static class Volume {
+        public final String label, path;
+        Volume(String label, String path) { this.label = label; this.path = path; }
+    }
+
+    /** Folder for Documents, Downloads, Pictures... or "" for internal storage. */
+    public static String readDataDir() {
+        return readFirstLine(DATA_DIR_FILE).trim();
+    }
+
+    public static void writeDataDir(String path) {
+        writeStateFile(DATA_DIR_FILE, path.trim() + "\n");
+    }
+
+    /** True when the chosen folder has not been applied yet, i.e. linux-desktop-data still has to run. */
+    public static boolean dataDirNeedsApplying() {
+        String applied = DATA_APPLIED_FILE.exists() ? readFirstLine(DATA_APPLIED_FILE).trim() : "";
+        return !readDataDir().equals(applied); // no applied file means internal storage, the default
+    }
+
+    /** True when a data folder is chosen but cannot be reached (for example the SD card was removed). */
+    public static boolean dataDirUnavailable() {
+        String dir = readDataDir();
+        return !dir.isEmpty() && !new File(dir).isDirectory();
+    }
+
+    /** "done|message" or "failed|message" from the last run of linux-desktop-data, or "". */
+    public static String readDataState() {
+        return readFirstLine(DATA_STATE_FILE);
+    }
+
+    public static void resetDataState() {
+        DATA_STATE_FILE.delete();
+    }
+
+    /** Runs linux-desktop-data in a background shell. */
+    public static boolean applyDataDir(Context context) {
+        resetDataState();
+        return isBootstrapInstalled() && writeScripts(context) && runInBackground(context, "linux-desktop-data");
+    }
+
+    public static java.util.List<Volume> removableVolumes(Context context) {
+        java.util.List<Volume> out = new java.util.ArrayList<>();
+        android.os.storage.StorageManager manager = (android.os.storage.StorageManager) context.getSystemService(Context.STORAGE_SERVICE);
+        if (manager == null) return out;
+        for (android.os.storage.StorageVolume volume : manager.getStorageVolumes()) {
+            if (!volume.isRemovable() || !android.os.Environment.MEDIA_MOUNTED.equals(volume.getState())) continue;
+            String path = null;
+            if (Build.VERSION.SDK_INT >= 30) {
+                File directory = volume.getDirectory();
+                if (directory != null) path = directory.getAbsolutePath();
+            } else {
+                try {
+                    path = (String) android.os.storage.StorageVolume.class.getMethod("getPath").invoke(volume);
+                } catch (Exception ignored) {}
+            }
+            if (path != null) out.add(new Volume(volume.getDescription(context), path));
+        }
+        return out;
+    }
+
+    /**
+     * Converts a folder picked with the system file picker into a real path, e.g.
+     * {@code primary:Documents/Linux} -> {@code /storage/emulated/0/Documents/Linux} and
+     * {@code 1A2B-3C4D:Stuff} -> {@code /storage/1A2B-3C4D/Stuff}. A whole card/volume is not used as is: a
+     * {@code LinuxDesktop} folder is added so your files do not mix with everything else. Returns null for
+     * pickers that are not plain storage (cloud drives and so on).
+     */
+    public static String pathFromTreeUri(Uri uri) {
+        if (!"com.android.externalstorage.documents".equals(uri.getAuthority())) return null;
+        String id = android.provider.DocumentsContract.getTreeDocumentId(uri);
+        int colon = id.indexOf(':');
+        if (colon < 0) return null;
+        String volume = id.substring(0, colon), relative = id.substring(colon + 1);
+        String root = "primary".equals(volume) ? "/storage/emulated/0" : "/storage/" + volume;
+        return relative.isEmpty() ? root + "/LinuxDesktop" : root + "/" + relative;
+    }
+
     /** Everything useful for diagnosing a failed install or a black display, as plain text. */
     public static String collectDebugInfo(Context context) {
         StringBuilder out = new StringBuilder();
@@ -130,6 +215,8 @@ public class DesktopLauncher {
         Progress p = readProgress();
         out.append("setup state: ").append(p.state).append(" ").append(p.percent).append("% ").append(p.message).append('\n');
         out.append("preset: ").append(readFirstLine(PRESET_FILE)).append('\n');
+        out.append("data folder: ").append(readDataDir().isEmpty() ? "internal" : readDataDir())
+            .append(", state: ").append(readDataState()).append('\n');
         out.append("extras: ").append(readFirstLine(new File(STATE_DIR, "extras-state"))).append(" / ")
             .append(readFirstLine(new File(STATE_DIR, "extras-progress"))).append('\n');
         appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
