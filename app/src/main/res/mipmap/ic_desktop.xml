@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icon for Android 7.0-7.1, which has no adaptive icons. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ic_desktop_background"/>
+            <corners android:radius="20dp"/>
+        </shape>
+    </item>
+    <item android:drawable="@drawable/ic_desktop_foreground"/>
+</layer-list>
