@@ -5,11 +5,37 @@
 
 MARK="$HOME/.config/linux-desktop"
 mkdir -p "$MARK"
+# Everything this script prints is kept for troubleshooting ("Copy debug info" includes the end of it).
+[ -t 1 ] || exec >>"$MARK/setup.log" 2>&1
+echo "=== setup started $(date) ==="
 # The app's setup screen reads these files to show progress.
 progress() { echo "$1|$2" > "$MARK/progress"; }
 state() { echo "$1" > "$MARK/state"; }
 state running
-progress 1 "Updating package lists"
+progress 1 "Preparing the Linux system"
+
+# Termux's bootstrap needs a one-time "second stage" (it runs the install scripts of the base packages).
+# Termux normally triggers it from the login shell's startup files, which this background shell never reads,
+# so without this step apt runs on a half-configured system and package installs fail.
+SECOND_STAGE="$PREFIX/etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh"
+if [ -f "$SECOND_STAGE" ] && [ ! -L "$SECOND_STAGE.lock" ]; then
+  echo "Running the Termux bootstrap second stage"
+  chmod +x "$SECOND_STAGE"
+  if ! "$SECOND_STAGE"; then
+    echo "Second stage failed" >&2
+    progress 0 "The Linux system could not be finished (base package setup failed). Tap Copy debug info and send it to the developer."
+    state failed
+    exit 1
+  fi
+fi
+
+# Repair anything an earlier attempt left half-installed.
+repair() {
+  DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+  DEBIAN_FRONTEND=noninteractive apt-get -f install -y
+}
+repair
+progress 2 "Updating package lists"
 
 TOTAL=0; DONE=0; FAILED=()
 
@@ -22,10 +48,12 @@ install_pkg() {
     if DEBIAN_FRONTEND=noninteractive pkg install -y "$1" >"$MARK/last-pkg.log" 2>&1; then
       printf '\033[0;32mok\033[0m\n'; return 0
     fi
+    # Keep every failure: the first one is usually the root cause of the ones after it.
+    cp "$MARK/last-pkg.log" "$MARK/failed-$(printf '%02d' "$DONE")-$1-attempt$attempt.log"
+    repair >>"$MARK/last-pkg.log" 2>&1
     sleep 2
   done
   printf '\033[0;31mfailed\033[0m\n'
-  cp "$MARK/last-pkg.log" "$MARK/failed-$1.log"
   FAILED+=("$1")
 }
 
@@ -37,6 +65,7 @@ case "$(getprop ro.hardware.egl 2>/dev/null)" in
 esac
 
 say "Updating package lists"
+rm -f "$MARK"/failed-*.log
 DEBIAN_FRONTEND=noninteractive pkg update -y
 progress 5 "Adding package repositories"
 for r in x11-repo tur-repo; do DEBIAN_FRONTEND=noninteractive pkg install -y "$r"; done

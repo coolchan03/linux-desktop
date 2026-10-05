@@ -12,6 +12,9 @@ NEW_PKG="@NEW_PKG@"
 [ "$OLD_PKG" = "$NEW_PKG" ] && exit 0
 
 export LC_ALL=C
+LOG="$HOME/.config/linux-desktop/relocate.log"
+mkdir -p "$(dirname "$LOG")" 2>/dev/null
+log() { echo "$(date '+%H:%M:%S') $*" >> "$LOG" 2>/dev/null; }
 OLD_RE="/data/\(data\|user/0\)/com\.termux"
 NEW_SUB="/data/\1/$NEW_PKG"
 
@@ -28,10 +31,11 @@ relocate_deb() {
         return 1
     fi
 
-    tmp=$(mktemp -d "$base/relocate.XXXXXX") || return 0
+    tmp=$(mktemp -d "$base/relocate.XXXXXX") || { log "mktemp failed in $base"; echo "lxdesk: cannot create a temporary folder in $base" >&2; return 1; }
     tree="$tmp/tree"
+    log "relocating $(basename "$deb") ($size_kb KB, $((free_kb / 1024)) MB free)"
 
-    if dpkg-deb -R "$deb" "$tree" 2>/dev/null; then
+    if dpkg-deb -R "$deb" "$tree" 2>"$tmp/err"; then
         for root in data/data data/user/0; do
             if [ -d "$tree/$root/$OLD_PKG" ]; then
                 mkdir -p "$tree/$root"
@@ -56,11 +60,22 @@ relocate_deb() {
         # Checksums no longer match the edited files.
         rm -f "$tree/DEBIAN/md5sums"
 
-        if dpkg-deb -Znone --root-owner-group -b "$tree" "$tmp/new.deb" >/dev/null 2>&1 ||
-           dpkg-deb -Znone -b "$tree" "$tmp/new.deb" >/dev/null 2>&1; then
+        if dpkg-deb -Znone --root-owner-group -b "$tree" "$tmp/new.deb" >/dev/null 2>"$tmp/err" ||
+           dpkg-deb -Znone -b "$tree" "$tmp/new.deb" >/dev/null 2>>"$tmp/err"; then
             rm -rf "$tree"                      # free the unpacked copy before replacing the deb
             mv -f "$tmp/new.deb" "$deb" 2>/dev/null || cat "$tmp/new.deb" > "$deb"
+            log "done $(basename "$deb")"
+        else
+            log "REPACK FAILED $(basename "$deb"): $(head -3 "$tmp/err" | tr '\n' ' ')"
+            echo "lxdesk: could not repack $(basename "$deb"): $(head -3 "$tmp/err" | tr '\n' ' ')" >&2
+            rm -rf "$tmp"
+            return 1
         fi
+    else
+        log "UNPACK FAILED $(basename "$deb"): $(head -3 "$tmp/err" | tr '\n' ' ')"
+        echo "lxdesk: could not unpack $(basename "$deb"): $(head -3 "$tmp/err" | tr '\n' ' ')" >&2
+        rm -rf "$tmp"
+        return 1
     fi
 
     rm -rf "$tmp"

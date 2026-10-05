@@ -219,11 +219,20 @@ public class DesktopLauncher {
             .append(", state: ").append(readDataState()).append('\n');
         out.append("extras: ").append(readFirstLine(new File(STATE_DIR, "extras-state"))).append(" / ")
             .append(readFirstLine(new File(STATE_DIR, "extras-progress"))).append('\n');
+        out.append("bootstrap second stage done: ")
+            .append(new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH,
+                "etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh.lock").exists()).append('\n');
         appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
+        appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
+        appendTail(out, "relocate.log", new File(STATE_DIR, "relocate.log"), 30);
         appendTail(out, "desktop.log", new File(STATE_DIR, "desktop.log"), 40);
+        // The FIRST failed package is usually the root cause of the later ones, so show it first.
         File[] failed = STATE_DIR.listFiles((dir, name) -> name.startsWith("failed-") && name.endsWith(".log"));
         if (failed != null && failed.length > 0) {
-            java.util.Arrays.sort(failed, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            java.util.Arrays.sort(failed, (a, b) -> a.getName().compareTo(b.getName()));
+            StringBuilder names = new StringBuilder();
+            for (File f : failed) names.append(f.getName()).append(' ');
+            out.append("failed package logs: ").append(names).append('\n');
             appendTail(out, failed[0].getName(), failed[0], 40);
         }
         return out.toString();
