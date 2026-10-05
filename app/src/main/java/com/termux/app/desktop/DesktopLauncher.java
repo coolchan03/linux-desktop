@@ -132,6 +132,7 @@ public class DesktopLauncher {
         out.append("preset: ").append(readFirstLine(PRESET_FILE)).append('\n');
         out.append("extras: ").append(readFirstLine(new File(STATE_DIR, "extras-state"))).append(" / ")
             .append(readFirstLine(new File(STATE_DIR, "extras-progress"))).append('\n');
+        appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
         appendTail(out, "desktop.log", new File(STATE_DIR, "desktop.log"), 40);
         File[] failed = STATE_DIR.listFiles((dir, name) -> name.startsWith("failed-") && name.endsWith(".log"));
         if (failed != null && failed.length > 0) {
@@ -155,6 +156,15 @@ public class DesktopLauncher {
             return;
         }
         for (String line : tail) out.append(line).append('\n');
+    }
+
+    /** Keeps the last bootstrap error so "Copy debug info" can include it. */
+    public static void saveBootstrapError(Context context, String message) {
+        try {
+            writeFile(new File(context.getFilesDir(), "bootstrap-error.log"), message);
+        } catch (IOException e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "Failed to save bootstrap error", e);
+        }
     }
 
     /** Forgets the result of an earlier setup attempt so a retry does not read stale "failed" state. */

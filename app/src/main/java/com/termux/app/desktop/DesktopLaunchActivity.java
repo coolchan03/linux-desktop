@@ -9,39 +9,46 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
-import android.net.ConnectivityManager;
-import android.net.NetworkCapabilities;
 import android.os.Looper;
 import android.os.StatFs;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.termux.R;
 import com.termux.app.TermuxInstaller;
 import com.termux.shared.android.PermissionUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * The app's only launcher entry ("Linux Desktop"). Asks once for the permissions the desktop and its
- * apps can use (camera, microphone, location, notifications, Bluetooth, media, all-files access), then:
- * sets up Termux if needed, lets you pick what to install, installs the desktop core while showing a
- * progress bar, starts the X server and XFCE in the background, and opens the built-in display.
- * Apps and tools install in the background afterwards. The plain terminal is available from the
- * icon's long-press shortcuts, as is "Stop desktop".
+ * apps can use (camera, microphone, location, notifications, Bluetooth, media, all-files access), then
+ * shows a branded loading screen while it sets up the Linux system, lets you pick what to install,
+ * installs the desktop core, starts the X server and XFCE in the background, and opens the built-in
+ * display. Apps and tools install in the background afterwards. The plain terminal is available from
+ * the icon's long-press shortcuts, as is "Stop desktop".
  */
 public class DesktopLaunchActivity extends Activity {
 
@@ -54,8 +61,28 @@ public class DesktopLaunchActivity extends Activity {
     private static final String KEY_PERMISSIONS_ASKED = "permissions_asked";
     private static final String KEY_KEEP_ALIVE_ASKED = "keep_alive_asked";
 
+    // Same palette as the app icon.
+    private static final int COLOR_BACKGROUND = 0xFF141C33;
+    private static final int COLOR_CARD = 0xFF1E2A4A;
+    private static final int COLOR_ACCENT = 0xFF4FC3F7;
+    private static final int COLOR_DONE = 0xFF81C784;
+    private static final int COLOR_ERROR = 0xFFFF8A80;
+    private static final int COLOR_TEXT = 0xFFFFFFFF;
+    private static final int COLOR_MUTED = 0xFF8A94A6;
+
+    private enum Step {
+        PREPARE("Prepare the Linux system"),
+        INSTALL("Install the desktop"),
+        START("Start the desktop");
+
+        final String label;
+        Step(String label) { this.label = label; }
+    }
+
     private final Handler mHandler = new Handler(Looper.getMainLooper());
-    private TextView mStatus;
+    private final TextView[] mStepViews = new TextView[Step.values().length];
+    private TextView mHeadline;
+    private TextView mDetail;
     private ProgressBar mBar;
     private Button mRetry;
     private Button mInstall;
@@ -64,6 +91,8 @@ public class DesktopLaunchActivity extends Activity {
     private boolean mFinished;
     private boolean mResumed;
     private boolean mSetupFinishedInBackground;
+    private Step mStep = Step.PREPARE;
+    private Runnable mRetryAction;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -90,6 +119,7 @@ public class DesktopLaunchActivity extends Activity {
             if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED)
                 missing.add(permission);
 
+        setProgress(Step.PREPARE, "Getting ready", "Android will ask for a few permissions. You can deny any of them.", -1);
         if (!missing.isEmpty())
             requestPermissions(missing.toArray(new String[0]), REQUEST_RUNTIME_PERMISSIONS);
         else
@@ -175,46 +205,105 @@ public class DesktopLaunchActivity extends Activity {
 
     // ---- UI ----
 
+    private int dp(float value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private TextView text(String value, float sp, int color) {
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(sp);
+        view.setTextColor(color);
+        return view;
+    }
+
+    private Button button(String label, boolean filled) {
+        Button button = new Button(this, null, filled ? android.R.attr.buttonStyle : android.R.attr.borderlessButtonStyle);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextColor(filled ? COLOR_BACKGROUND : COLOR_MUTED);
+        if (filled) {
+            GradientDrawable shape = new GradientDrawable();
+            shape.setColor(COLOR_ACCENT);
+            shape.setCornerRadius(dp(24));
+            button.setBackground(shape);
+        }
+        return button;
+    }
+
     private void buildUi() {
-        float density = getResources().getDisplayMetrics().density;
-        int pad = (int) (24 * density);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
-        root.setPadding(pad, pad, pad, pad);
+        getWindow().setStatusBarColor(COLOR_BACKGROUND);
+        getWindow().setNavigationBarColor(COLOR_BACKGROUND);
 
-        TextView title = new TextView(this);
-        title.setText("Linux Desktop");
-        title.setTextSize(26);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER_HORIZONTAL);
+        content.setPadding(dp(28), dp(48), dp(28), dp(28));
+
+        ImageView icon = new ImageView(this);
+        GradientDrawable iconBackground = new GradientDrawable();
+        iconBackground.setColor(COLOR_CARD);
+        iconBackground.setCornerRadius(dp(28));
+        icon.setBackground(iconBackground);
+        icon.setImageResource(R.drawable.ic_desktop_foreground);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        content.addView(icon, new LinearLayout.LayoutParams(dp(112), dp(112)));
+
+        TextView title = text("Linux Desktop", 26, COLOR_TEXT);
+        title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
-        root.addView(title);
+        title.setPadding(0, dp(20), 0, dp(4));
+        content.addView(title);
 
-        mStatus = new TextView(this);
-        mStatus.setText("Starting...");
-        mStatus.setGravity(Gravity.CENTER);
-        mStatus.setPadding(0, pad, 0, pad);
-        root.addView(mStatus);
+        TextView subtitle = text("Setting up your desktop", 14, COLOR_MUTED);
+        subtitle.setGravity(Gravity.CENTER);
+        content.addView(subtitle);
+
+        LinearLayout steps = new LinearLayout(this);
+        steps.setOrientation(LinearLayout.VERTICAL);
+        steps.setPadding(dp(8), dp(28), dp(8), dp(20));
+        for (Step step : Step.values()) {
+            TextView row = text("", 16, COLOR_MUTED);
+            row.setPadding(0, dp(5), 0, dp(5));
+            mStepViews[step.ordinal()] = row;
+            steps.addView(row);
+        }
+        content.addView(steps, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         mBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         mBar.setIndeterminate(true);
         mBar.setMax(100);
-        root.addView(mBar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        mBar.setProgressTintList(ColorStateList.valueOf(COLOR_ACCENT));
+        mBar.setIndeterminateTintList(ColorStateList.valueOf(COLOR_ACCENT));
+        mBar.setProgressBackgroundTintList(ColorStateList.valueOf(COLOR_CARD));
+        content.addView(mBar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(8)));
+
+        mHeadline = text("Starting...", 17, COLOR_TEXT);
+        mHeadline.setGravity(Gravity.CENTER);
+        mHeadline.setPadding(0, dp(18), 0, dp(4));
+        content.addView(mHeadline);
+
+        mDetail = text("", 14, COLOR_MUTED);
+        mDetail.setGravity(Gravity.CENTER);
+        content.addView(mDetail);
 
         mPresets = new RadioGroup(this);
         mPresets.setVisibility(View.GONE);
+        mPresets.setPadding(0, dp(16), 0, 0);
         for (DesktopLauncher.Preset preset : DesktopLauncher.Preset.values()) {
-            RadioButton button = new RadioButton(this);
-            button.setId(View.generateViewId());
-            button.setTag(preset);
-            button.setText(preset.title + ": " + preset.description);
-            button.setPadding(0, (int) (6 * density), 0, (int) (6 * density));
-            mPresets.addView(button);
-            if (preset == DesktopLauncher.Preset.STANDARD) button.setChecked(true);
+            RadioButton choice = new RadioButton(this);
+            choice.setId(View.generateViewId());
+            choice.setTag(preset);
+            choice.setText(preset.title + "\n" + preset.description);
+            choice.setTextColor(COLOR_TEXT);
+            choice.setButtonTintList(ColorStateList.valueOf(COLOR_ACCENT));
+            choice.setPadding(dp(8), dp(8), 0, dp(8));
+            mPresets.addView(choice);
+            if (preset == DesktopLauncher.Preset.STANDARD) choice.setChecked(true);
         }
-        root.addView(mPresets);
+        content.addView(mPresets, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        mInstall = new Button(this);
-        mInstall.setText("Install");
+        mInstall = button("Install", true);
         mInstall.setVisibility(View.GONE);
         mInstall.setOnClickListener(v -> {
             RadioButton checked = findViewById(mPresets.getCheckedRadioButtonId());
@@ -223,30 +312,61 @@ public class DesktopLaunchActivity extends Activity {
             mInstall.setVisibility(View.GONE);
             runSetup();
         });
-        root.addView(mInstall);
+        LinearLayout.LayoutParams wide = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52));
+        wide.topMargin = dp(16);
+        content.addView(mInstall, wide);
 
-        mRetry = new Button(this);
-        mRetry.setText("Try again");
+        mRetry = button("Try again", true);
         mRetry.setVisibility(View.GONE);
-        mRetry.setOnClickListener(v -> { mRetry.setVisibility(View.GONE); runSetup(); });
-        root.addView(mRetry);
+        mRetry.setOnClickListener(v -> {
+            mRetry.setVisibility(View.GONE);
+            if (mRetryAction != null) mRetryAction.run();
+        });
+        LinearLayout.LayoutParams wide2 = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52));
+        wide2.topMargin = dp(16);
+        content.addView(mRetry, wide2);
 
-        Button debug = new Button(this, null, android.R.attr.borderlessButtonStyle);
-        debug.setText("Copy debug info");
+        Button debug = button("Copy debug info", false);
         debug.setOnClickListener(v -> {
             ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             clipboard.setPrimaryClip(ClipData.newPlainText("Linux Desktop debug info", DesktopLauncher.collectDebugInfo(this)));
             Toast.makeText(this, "Copied. Paste it into your message.", Toast.LENGTH_LONG).show();
         });
         LinearLayout.LayoutParams debugParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        debugParams.topMargin = pad;
-        root.addView(debug, debugParams);
+        debugParams.topMargin = dp(24);
+        content.addView(debug, debugParams);
 
-        setContentView(root);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(COLOR_BACKGROUND);
+        scroll.setFillViewport(true);
+        scroll.addView(content);
+        setContentView(scroll);
+
+        renderSteps(Step.PREPARE, false);
     }
 
-    private void setStatus(String text, int percent) {
-        mStatus.setText(text);
+    /** Shows which of the three steps is current, done, or still to come. */
+    private void renderSteps(Step current, boolean failed) {
+        mStep = current;
+        for (Step step : Step.values()) {
+            TextView row = mStepViews[step.ordinal()];
+            String mark;
+            int color;
+            if (step.ordinal() < current.ordinal()) { mark = "✓"; color = COLOR_DONE; }
+            else if (step == current) { mark = failed ? "✕" : "●"; color = failed ? COLOR_ERROR : COLOR_ACCENT; }
+            else { mark = "○"; color = COLOR_MUTED; }
+            row.setText(mark + "   " + step.label);
+            row.setTextColor(color);
+        }
+    }
+
+    /** headline: what is happening now. detail: the fine print. percent < 0 means "no exact number". */
+    private void setProgress(Step step, String headline, String detail, int percent) {
+        renderSteps(step, false);
+        mHeadline.setTextColor(COLOR_TEXT);
+        mHeadline.setText(percent >= 0 ? headline + "  " + percent + "%" : headline);
+        mDetail.setText(detail);
+        mBar.setVisibility(View.VISIBLE);
         if (percent < 0) {
             mBar.setIndeterminate(true);
         } else {
@@ -255,19 +375,47 @@ public class DesktopLaunchActivity extends Activity {
         }
     }
 
+    private void showError(Step step, String headline, String detail, Runnable retry) {
+        renderSteps(step, true);
+        mHeadline.setTextColor(COLOR_ERROR);
+        mHeadline.setText(headline);
+        mDetail.setText(detail);
+        mBar.setVisibility(View.GONE);
+        mRetryAction = retry;
+        mRetry.setVisibility(retry == null ? View.GONE : View.VISIBLE);
+    }
+
     // ---- Flow: bootstrap -> choose + install desktop core -> keep-alive hints -> start desktop ----
 
     private void begin() {
         if (mBegun) return;
         mBegun = true;
-        setStatus("Preparing the desktop environment...", -1);
-        // Shows its own dialog while unpacking on first run; calls back immediately if already done.
-        TermuxInstaller.setupBootstrapIfNeeded(this, this::afterBootstrap);
+        setupSystem();
+    }
+
+    private void setupSystem() {
+        setProgress(Step.PREPARE, "Preparing the Linux system", "First time only. This takes a minute.", -1);
+        // Own progress and error display instead of Termux's dialogs; calls back immediately if already set up.
+        TermuxInstaller.setupBootstrapIfNeeded(this, this::afterBootstrap, new TermuxInstaller.Listener() {
+            @Override
+            public void onProgress(String message) {
+                setProgress(Step.PREPARE, message, "First time only. Please keep this screen open.", -1);
+            }
+
+            @Override
+            public void onError(String message) {
+                DesktopLauncher.saveBootstrapError(DesktopLaunchActivity.this, message);
+                showError(Step.PREPARE, "The Linux system could not be set up",
+                    "Check that you have enough free storage and try again. If it keeps failing, tap \"Copy debug info\" and send it to the developer.",
+                    DesktopLaunchActivity.this::setupSystem);
+            }
+        });
     }
 
     private void afterBootstrap() {
         if (!DesktopLauncher.isBootstrapInstalled()) {
-            setStatus("Setup could not finish. Check your internet connection and storage, then reopen the app.", 0);
+            showError(Step.PREPARE, "Setup could not finish",
+                "Check your free storage and try again.", this::setupSystem);
             return;
         }
         if (DesktopLauncher.isInstalled()) {
@@ -278,13 +426,20 @@ public class DesktopLaunchActivity extends Activity {
         if ("running".equals(p.state) && p.active) {
             runSetup(); // reopened while an earlier setup shell is still running: keep watching it
         } else {
-            setStatus("What should be installed on top of the desktop? Apps install in the background, so you can start using the desktop right after the first few minutes.\n\n"
-                + "Free storage: " + String.format(java.util.Locale.US, "%.1f", freeStorageGb()) + " GB. Roughly needed: Minimal 3 GB, Standard 5 GB, Full 9 GB.\n"
-                + (hasInternet() ? "Wi-Fi is recommended; the download is large." : "No internet connection detected. Connect before installing."), 0);
-            mBar.setVisibility(View.GONE);
-            mPresets.setVisibility(View.VISIBLE);
-            mInstall.setVisibility(View.VISIBLE);
+            showChooser();
         }
+    }
+
+    private void showChooser() {
+        renderSteps(Step.INSTALL, false);
+        mHeadline.setTextColor(COLOR_TEXT);
+        mHeadline.setText("What should be installed?");
+        mDetail.setText("The desktop installs first (about 5-10 minutes). Apps install in the background so you can start using it right away.\n\n"
+            + "Free storage: " + String.format(Locale.US, "%.1f", freeStorageGb()) + " GB. Roughly needed: Minimal 3 GB, Standard 5 GB, Full 9 GB.\n"
+            + (hasInternet() ? "Wi-Fi is recommended; the download is large." : "No internet connection detected. Connect before installing."));
+        mBar.setVisibility(View.GONE);
+        mPresets.setVisibility(View.VISIBLE);
+        mInstall.setVisibility(View.VISIBLE);
     }
 
     private double freeStorageGb() {
@@ -303,25 +458,23 @@ public class DesktopLaunchActivity extends Activity {
     }
 
     private void runSetup() {
-        mBar.setVisibility(View.VISIBLE);
         DesktopLauncher.Progress p = DesktopLauncher.readProgress();
         boolean alreadyRunning = "running".equals(p.state) && p.active;
         if (!alreadyRunning && !hasInternet()) {
-            setStatus("No internet connection. Connect to Wi-Fi or mobile data, then tap Try again.", 0);
-            mRetry.setVisibility(View.VISIBLE);
+            showError(Step.INSTALL, "No internet connection",
+                "Connect to Wi-Fi or mobile data, then try again.", this::runSetup);
             return;
         }
         if (!alreadyRunning && freeStorageGb() < 3.0) {
-            setStatus("Not enough free storage (" + String.format(java.util.Locale.US, "%.1f", freeStorageGb())
-                + " GB). Free up at least 3 GB, then tap Try again.", 0);
-            mRetry.setVisibility(View.VISIBLE);
+            showError(Step.INSTALL, "Not enough free storage",
+                String.format(Locale.US, "%.1f", freeStorageGb()) + " GB free. Free up at least 3 GB, then try again.", this::runSetup);
             return;
         }
         if (!alreadyRunning) {
-            setStatus("Installing the desktop. This takes about 5-10 minutes and needs internet.", 0);
+            setProgress(Step.INSTALL, "Installing the desktop", "This takes about 5-10 minutes and needs internet.", 0);
             DesktopLauncher.resetProgress();
             if (!DesktopLauncher.startSetup(this)) {
-                setStatus("Could not write the setup scripts.", 0);
+                showError(Step.INSTALL, "Could not start the installer", "Try again.", this::runSetup);
                 return;
             }
         }
@@ -337,11 +490,11 @@ public class DesktopLaunchActivity extends Activity {
         }
         DesktopLauncher.Progress p = DesktopLauncher.readProgress();
         if ("failed".equals(p.state)) {
-            setStatus(p.message, 0);
-            mRetry.setVisibility(View.VISIBLE);
+            showError(Step.INSTALL, "The installation hit a problem", p.message, this::runSetup);
             return;
         }
-        if (!p.message.isEmpty()) setStatus(p.message + "\nYou can leave the app; installation continues.", p.percent);
+        if (!p.message.isEmpty())
+            setProgress(Step.INSTALL, "Installing the desktop", p.message + "\nYou can leave the app; installation continues.", p.percent);
         mHandler.postDelayed(this::pollSetup, 700);
     }
 
@@ -385,12 +538,11 @@ public class DesktopLaunchActivity extends Activity {
     private void startDesktop() {
         if (mFinished) return;
         mFinished = true;
-        mBar.setVisibility(View.VISIBLE);
-        setStatus("Starting desktop...", -1);
+        setProgress(Step.START, "Starting the desktop", "Opening the display...", -1);
         DesktopLauncher.applyDisplayDefaults(this);
         if (!DesktopLauncher.startDesktop(this)) {
-            setStatus("Could not start the desktop.", 0);
             mFinished = false;
+            showError(Step.START, "Could not start the desktop", "Try again.", this::startDesktop);
             return;
         }
         // The display waits for the X server to connect, so it can open right away.
