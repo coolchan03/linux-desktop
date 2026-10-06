@@ -35,9 +35,12 @@ export PULSE_SERVER=127.0.0.1
 
 X11_LOG="$HOME/.config/linux-desktop/x11.log"
 : > "$X11_LOG"
+X11_SOCKET="${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
+# A crashed X server can leave the Unix socket node behind. Do not mistake that stale file for a
+# newly-ready server on the next launch.
+rm -f "$X11_SOCKET" 2>/dev/null
 termux-x11 :0 -ac >>"$X11_LOG" 2>&1 &
 X11_PID=$!
-X11_SOCKET="${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
 tries=0
 while [ ! -S "$X11_SOCKET" ] && [ $tries -lt 150 ]; do
   if ! kill -0 "$X11_PID" 2>/dev/null; then

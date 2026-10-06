@@ -74,7 +74,9 @@ public class DesktopLauncher {
         if (!pidText.isEmpty()) {
             try {
                 long pid = Long.parseLong(pidText);
-                active = pid > 0 && new File("/proc/" + pid).isDirectory();
+                File procDir = new File("/proc/" + pid);
+                String cmdline = readFirstLine(new File(procDir, "cmdline")).replace('\0', ' ');
+                active = pid > 0 && procDir.isDirectory() && cmdline.contains("linux-desktop-setup");
             } catch (NumberFormatException ignored) {}
         } else if (!SETUP_PID_FILE.exists()) {
             // Compatibility with an install started by an older build that did not write setup.pid.
@@ -284,6 +286,7 @@ public class DesktopLauncher {
     public static void resetProgress() {
         PROGRESS_FILE.delete();
         STATE_FILE.delete();
+        SETUP_PID_FILE.delete();
     }
 
     /** Runs {@code linux-desktop-setup} in a background shell. Returns false if scripts could not be written. */
@@ -304,8 +307,13 @@ public class DesktopLauncher {
         intent.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, TermuxConstants.TERMUX_HOME_DIR_PATH);
         intent.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, true);
         intent.putExtra(TERMUX_SERVICE.EXTRA_COMMAND_LABEL, script);
-        ContextCompat.startForegroundService(context, intent);
-        return true;
+        try {
+            ContextCompat.startForegroundService(context, intent);
+            return true;
+        } catch (RuntimeException e) {
+            Logger.logStackTraceWithMessage(LOG_TAG, "Failed to start background script " + script, e);
+            return false;
+        }
     }
 
     private static String readFirstLine(File file) {

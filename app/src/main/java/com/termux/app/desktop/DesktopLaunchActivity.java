@@ -43,9 +43,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The app's only launcher entry ("Linux Desktop"). Asks once for the permissions the desktop and its
- * apps can use (camera, microphone, location, notifications, Bluetooth, media, all-files access), then
- * shows a branded loading screen while it sets up the Linux system, lets you pick what to install,
+ * The app's only launcher entry ("Linux Desktop"). Asks once for optional runtime permissions the desktop
+ * and its apps can use (camera, microphone, location, notifications, Bluetooth and media); all-files access
+ * is requested only when external storage is selected. It then shows a branded loading screen while it sets up the Linux system, lets you pick what to install,
  * installs the desktop core, starts the X server and XFCE in the background, and opens the built-in
  * display. Apps and tools install in the background afterwards. The plain terminal is available from
  * the icon's long-press shortcuts, as is "Stop desktop".
@@ -135,7 +135,7 @@ public class DesktopLaunchActivity extends Activity {
         if (!missing.isEmpty())
             requestPermissions(missing.toArray(new String[0]), REQUEST_RUNTIME_PERMISSIONS);
         else
-            requestAllFilesAccessOrBegin();
+            begin();
     }
 
     @Override
@@ -195,19 +195,7 @@ public class DesktopLaunchActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         // Denied permissions are not fatal; the desktop works without them.
-        requestAllFilesAccessOrBegin();
-    }
-
-    private void requestAllFilesAccessOrBegin() {
-        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
-            try {
-                startActivityForResult(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:" + getPackageName())), REQUEST_ALL_FILES_ACCESS);
-                return;
-            } catch (Exception e) {
-                // No such settings screen on this device; carry on without it.
-            }
-        }
+        // All-files access is requested later only if the user chooses external storage.
         begin();
     }
 

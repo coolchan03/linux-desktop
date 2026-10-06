@@ -23,7 +23,7 @@ Requires **Android 7 or newer**. Allow "install from unknown sources" when your 
 
 ## First run
 
-1. Open **Linux Desktop** and allow the permission prompts. All are optional: camera, microphone, location, notifications, Bluetooth, media, all-files access.
+1. Open **Linux Desktop** and answer the optional permission prompts for camera, microphone, location, notifications, Bluetooth and media. **All-files access is only requested if you choose an SD card or another external folder for your files.**
 2. A loading screen walks through three steps: **prepare the Linux system**, **install the desktop**, **start the desktop**, and always says what it is doing right now.
 3. Choose what to install:
    - **Minimal**: the desktop only
