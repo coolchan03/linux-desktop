@@ -77,7 +77,7 @@ public class DesktopLauncher {
     public enum Preset {
         MINIMAL("minimal", "Minimal", "Desktop only. Add apps later with pkg."),
         STANDARD("standard", "Standard", "Desktop + Firefox, VS Code, git."),
-        FULL("full", "Full", "Standard + security tools (nmap, hydra, sqlmap...) and Windows apps (Wine).");
+        FULL("full", "Full", "Standard + available security/network tools and Windows apps (Wine on arm64).");
 
         public final String id, title, description;
         Preset(String id, String title, String description) { this.id = id; this.title = title; this.description = description; }
@@ -219,6 +219,7 @@ public class DesktopLauncher {
             .append(", state: ").append(readDataState()).append('\n');
         out.append("extras: ").append(readFirstLine(new File(STATE_DIR, "extras-state"))).append(" / ")
             .append(readFirstLine(new File(STATE_DIR, "extras-progress"))).append('\n');
+        appendTail(out, "extras-skipped.log", new File(STATE_DIR, "extras-skipped.log"), 20);
         out.append("bootstrap second stage done: ")
             .append(new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH,
                 "etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh.lock").exists()).append('\n');
@@ -226,6 +227,7 @@ public class DesktopLauncher {
         appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
         appendTail(out, "relocate.log", new File(STATE_DIR, "relocate.log"), 30);
         appendTail(out, "gpu.log", new File(STATE_DIR, "gpu.log"), 30);
+        appendTail(out, "x11.log", new File(STATE_DIR, "x11.log"), 40);
         appendTail(out, "desktop.log", new File(STATE_DIR, "desktop.log"), 40);
         // The FIRST failed package is usually the root cause of the later ones, so show it first.
         File[] failed = STATE_DIR.listFiles((dir, name) -> name.startsWith("failed-") && name.endsWith(".log"));

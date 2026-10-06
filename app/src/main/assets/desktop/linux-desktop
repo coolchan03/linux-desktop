@@ -33,11 +33,28 @@ export PULSE_SERVER=127.0.0.1
 # Apps and tools install in the background so the desktop appears as soon as the core is ready.
 (linux-desktop-extras >/dev/null 2>&1 &)
 
-termux-x11 :0 -ac &
-sleep 2
+X11_LOG="$HOME/.config/linux-desktop/x11.log"
+: > "$X11_LOG"
+termux-x11 :0 -ac >>"$X11_LOG" 2>&1 &
+X11_PID=$!
+X11_SOCKET="${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
+tries=0
+while [ ! -S "$X11_SOCKET" ] && [ $tries -lt 150 ]; do
+  if ! kill -0 "$X11_PID" 2>/dev/null; then
+    echo "The embedded X11 server exited before becoming ready."
+    exit 1
+  fi
+  sleep 0.1
+  tries=$((tries + 1))
+done
+if [ ! -S "$X11_SOCKET" ]; then
+  echo "The embedded X11 server did not become ready."
+  kill "$X11_PID" 2>/dev/null || true
+  exit 1
+fi
 export DISPLAY=:0
 
-# Bring the built-in display to the front.
-am start --user 0 -n @PKG@/com.termux.x11.MainActivity >/dev/null 2>&1
+# Bring the built-in display to the front in the Android user/profile that launched this app.
+am start -n @PKG@/com.termux.x11.MainActivity >/dev/null 2>&1
 
 exec dbus-launch --exit-with-session startxfce4
