@@ -635,7 +635,7 @@ public class LoriePreferences extends AppCompatActivity implements PreferenceFra
                                     sendResponse(remote, 1, 1, "Permission denied.\n" +
                                             "Android requires WRITE_SECURE_SETTINGS permission to change `enableAccessibilityServiceAutomatically` setting.\n" +
                                             "Please, launch this command using ADB:\n" +
-                                            "adb shell pm grant com.termux.x11 android.permission.WRITE_SECURE_SETTINGS");
+                                            "adb shell pm grant " + BuildConfig.APPLICATION_ID + " android.permission.WRITE_SECURE_SETTINGS");
                                     return;
                                 }
 

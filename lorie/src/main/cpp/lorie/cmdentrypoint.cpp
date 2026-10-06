@@ -115,12 +115,19 @@ static jboolean start(JNIEnv *env, jobject self, jobjectArray args) {
         execlp("logcat", "logcat", "--pid", pid, nullptr);
     }
 
+    // Use the prefix inherited from the host Termux shell. This project is embedded in an app whose
+    // package id is not necessarily com.termux, so native code must not hard-code /data/data/com.termux.
+    const char *termux_prefix = getenv("PREFIX");
+
     // No matter what tracer is attached.
     // In the case of gdb or lldb LD_PRELOAD is already set.
     // In the case of proot or proot-distro libtermux-exec in LD_PRELOAD will break linking.
-    if (access("/data/data/com.termux/files/usr/lib/libtermux-exec.so", F_OK) == 0 && !detectTracer()
-            && !getenv("XSTARTUP_LD_PRELOAD"))
-        setenv("LD_PRELOAD", "/data/data/com.termux/files/usr/lib/libtermux-exec.so", 1);
+    if (termux_prefix && !detectTracer() && !getenv("XSTARTUP_LD_PRELOAD")) {
+        char termux_exec[1024] = {0};
+        snprintf(termux_exec, sizeof(termux_exec), "%s/lib/libtermux-exec.so", termux_prefix);
+        if (access(termux_exec, F_OK) == 0)
+            setenv("LD_PRELOAD", termux_exec, 1);
+    }
 
     // adb sets TMPDIR to /data/local/tmp which is pretty useless.
     if (!strcmp("/data/local/tmp", getenv("TMPDIR") ?: ""))
@@ -129,8 +136,12 @@ static jboolean start(JNIEnv *env, jobject self, jobjectArray args) {
     if (!getenv("TMPDIR")) {
         if (access("/tmp", F_OK) == 0)
             setenv("TMPDIR", "/tmp", 1);
-        else if (access("/data/data/com.termux/files/usr/tmp", F_OK) == 0)
-            setenv("TMPDIR", "/data/data/com.termux/files/usr/tmp", 1);
+        else if (termux_prefix) {
+            char termux_tmp[1024] = {0};
+            snprintf(termux_tmp, sizeof(termux_tmp), "%s/tmp", termux_prefix);
+            if (access(termux_tmp, F_OK) == 0)
+                setenv("TMPDIR", termux_tmp, 1);
+        }
     }
 
     if (!getenv("TMPDIR")) {
@@ -186,11 +197,18 @@ static jboolean start(JNIEnv *env, jobject self, jobjectArray args) {
             setenv("XKB_CONFIG_ROOT", "/usr/share/xkeyboard-config-2", 1);
         else if (access("/usr/share/X11/xkb", F_OK) == 0)
             setenv("XKB_CONFIG_ROOT", "/usr/share/X11/xkb", 1);
-        // Termux case
-        else if (access("/data/data/com.termux/files/usr/share/xkeyboard-config-2", F_OK) == 0)
-            setenv("XKB_CONFIG_ROOT", "/data/data/com.termux/files/usr/share/xkeyboard-config-2", 1);
-        else if (access("/data/data/com.termux/files/usr/share/X11/xkb", F_OK) == 0)
-            setenv("XKB_CONFIG_ROOT", "/data/data/com.termux/files/usr/share/X11/xkb", 1);
+        // Termux case: derive paths from the host shell prefix instead of assuming package com.termux.
+        else if (termux_prefix) {
+            char xkb_path[1024] = {0};
+            snprintf(xkb_path, sizeof(xkb_path), "%s/share/xkeyboard-config-2", termux_prefix);
+            if (access(xkb_path, F_OK) == 0)
+                setenv("XKB_CONFIG_ROOT", xkb_path, 1);
+            else {
+                snprintf(xkb_path, sizeof(xkb_path), "%s/share/X11/xkb", termux_prefix);
+                if (access(xkb_path, F_OK) == 0)
+                    setenv("XKB_CONFIG_ROOT", xkb_path, 1);
+            }
+        }
     }
 
     if (!getenv("XKB_CONFIG_ROOT")) {
