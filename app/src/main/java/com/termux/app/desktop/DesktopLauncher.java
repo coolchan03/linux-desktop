@@ -225,6 +225,7 @@ public class DesktopLauncher {
         appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
         appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
         appendTail(out, "relocate.log", new File(STATE_DIR, "relocate.log"), 30);
+        appendTail(out, "gpu.log", new File(STATE_DIR, "gpu.log"), 30);
         appendTail(out, "desktop.log", new File(STATE_DIR, "desktop.log"), 40);
         // The FIRST failed package is usually the root cause of the later ones, so show it first.
         File[] failed = STATE_DIR.listFiles((dir, name) -> name.startsWith("failed-") && name.endsWith(".log"));

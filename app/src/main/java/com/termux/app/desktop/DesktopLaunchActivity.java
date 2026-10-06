@@ -638,6 +638,12 @@ public class DesktopLaunchActivity extends Activity {
             showError(Step.INSTALL, "The installation hit a problem", p.message, this::runSetup);
             return;
         }
+        if ("running".equals(p.state) && !p.active) {
+            showError(Step.INSTALL, "The installer stopped responding",
+                "The background installer stopped updating before setup finished. Tap Try again to resume the repair/install process.",
+                this::runSetup);
+            return;
+        }
         if (!p.message.isEmpty())
             setProgress(Step.INSTALL, "Installing the desktop", p.message + "\nYou can leave the app; installation continues.", p.percent);
         mHandler.postDelayed(this::pollSetup, 700);

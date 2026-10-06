@@ -57,12 +57,9 @@ install_pkg() {
   FAILED+=("$1")
 }
 
-# Core packages: the desktop will not start without these.
-CORE=(procps xorg-xrandr xkeyboard-config xfce4 xfce4-terminal thunar mousepad pulseaudio dbus mesa-zink vulkan-loader-android)
-case "$(getprop ro.hardware.egl 2>/dev/null)" in
-  *adreno*) CORE+=(mesa-vulkan-icd-freedreno) ;;
-  *)        CORE+=(mesa-vulkan-icd-swrast) ;;
-esac
+# Core packages: keep first boot conservative. Current Termux ships Zink inside the regular mesa package.
+# GPU-specific Vulkan drivers are optional so a stale/missing driver package can never block XFCE itself.
+CORE=(procps xorg-xrandr xkeyboard-config xfce4 xfce4-terminal thunar mousepad pulseaudio dbus mesa)
 
 say "Updating package lists"
 rm -f "$MARK"/failed-*.log
@@ -82,17 +79,27 @@ if [ ${#FAILED[@]} -gt 0 ]; then
   exit 1
 fi
 
-# GPU acceleration profile (Zink over Turnip on Adreno, software Vulkan elsewhere)
-cat > "$HOME/.config/hacklab-gpu.sh" <<'EOF'
-export MESA_NO_ERROR=1
-export MESA_GL_VERSION_OVERRIDE=4.6
-export MESA_GLES_VERSION_OVERRIDE=3.2
+# Graphics must never make first boot fail. Mesa provides llvmpipe/softpipe as a safe fallback.
+GPU_PROFILE="$HOME/.config/hacklab-gpu.sh"
+: > "$GPU_PROFILE"
+GPU_VENDOR="$(getprop ro.hardware.egl 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+if echo "$GPU_VENDOR" | grep -q adreno; then
+  progress 96 "Enabling optional Adreno GPU acceleration"
+  echo "Trying optional Adreno/Turnip acceleration" > "$MARK/gpu.log"
+  if DEBIAN_FRONTEND=noninteractive pkg install -y vulkan-loader-generic mesa-vulkan-icd-freedreno >>"$MARK/gpu.log" 2>&1; then
+    cat > "$GPU_PROFILE" <<'EOF'
 export GALLIUM_DRIVER=zink
 export MESA_LOADER_DRIVER_OVERRIDE=zink
 export TU_DEBUG=noconform
-export MESA_VK_WSI_PRESENT_MODE=immediate
-export ZINK_DESCRIPTORS=lazy
 EOF
+    echo "Adreno/Turnip acceleration enabled" >> "$MARK/gpu.log"
+  else
+    echo "Optional GPU packages failed; using Mesa software rendering instead." | tee -a "$MARK/gpu.log"
+    repair >>"$MARK/gpu.log" 2>&1 || true
+  fi
+else
+  echo "No explicit Adreno GPU detected; using Mesa software rendering." > "$MARK/gpu.log"
+fi
 
 mkdir -p "$HOME/Desktop"
 printf '[Desktop Entry]\nName=Terminal\nExec=xfce4-terminal\nIcon=utilities-terminal\nType=Application\nCategories=System;TerminalEmulator;\n' > "$HOME/Desktop/Terminal.desktop"
