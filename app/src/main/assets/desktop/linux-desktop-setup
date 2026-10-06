@@ -11,6 +11,9 @@ echo "=== setup started $(date) ==="
 # The app's setup screen reads these files to show progress.
 progress() { echo "$1|$2" > "$MARK/progress"; }
 state() { echo "$1" > "$MARK/state"; }
+# Let the Android UI distinguish a genuinely running installer from a stale progress file after a crash.
+echo $$ > "$MARK/setup.pid"
+trap 'rm -f "$MARK/setup.pid"' EXIT
 state running
 progress 1 "Preparing the Linux system"
 

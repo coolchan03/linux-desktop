@@ -34,6 +34,7 @@ public class DesktopLauncher {
     private static final File INSTALLED_MARKER = new File(STATE_DIR, "installed-v1");
     private static final File PROGRESS_FILE = new File(STATE_DIR, "progress");
     private static final File STATE_FILE = new File(STATE_DIR, "state");
+    private static final File SETUP_PID_FILE = new File(STATE_DIR, "setup.pid");
     private static final File PRESET_FILE = new File(STATE_DIR, "preset");
     private static final File DATA_DIR_FILE = new File(STATE_DIR, "datadir");
     private static final File DATA_APPLIED_FILE = new File(STATE_DIR, "datadir-applied");
@@ -44,7 +45,7 @@ public class DesktopLauncher {
         public final int percent;
         public final String message;
         public final String state; // "running", "done", "failed" or "" if setup has not started
-        /** True if the progress file was updated recently, i.e. a setup shell is still alive. */
+        /** True if the setup shell is still alive. */
         public final boolean active;
 
         Progress(int percent, String message, String state, boolean active) {
@@ -68,7 +69,17 @@ public class DesktopLauncher {
             try { percent = Integer.parseInt(parts[0].trim()); } catch (NumberFormatException ignored) {}
             message = parts[1];
         }
-        boolean active = PROGRESS_FILE.exists() && System.currentTimeMillis() - PROGRESS_FILE.lastModified() < 30 * 60 * 1000;
+        boolean active = false;
+        String pidText = readFirstLine(SETUP_PID_FILE).trim();
+        if (!pidText.isEmpty()) {
+            try {
+                long pid = Long.parseLong(pidText);
+                active = pid > 0 && new File("/proc/" + pid).isDirectory();
+            } catch (NumberFormatException ignored) {}
+        } else if (!SETUP_PID_FILE.exists()) {
+            // Compatibility with an install started by an older build that did not write setup.pid.
+            active = PROGRESS_FILE.exists() && System.currentTimeMillis() - PROGRESS_FILE.lastModified() < 30 * 60 * 1000;
+        }
         return new Progress(percent, message, readFirstLine(STATE_FILE).trim(), active);
     }
 
@@ -213,7 +224,8 @@ public class DesktopLauncher {
             .append("bootstrap installed: ").append(isBootstrapInstalled())
             .append(", desktop installed: ").append(isInstalled()).append('\n');
         Progress p = readProgress();
-        out.append("setup state: ").append(p.state).append(" ").append(p.percent).append("% ").append(p.message).append('\n');
+        out.append("setup state: ").append(p.state).append(" ").append(p.percent).append("% ").append(p.message)
+            .append(", process active: ").append(p.active).append('\n');
         out.append("preset: ").append(readFirstLine(PRESET_FILE)).append('\n');
         out.append("data folder: ").append(readDataDir().isEmpty() ? "internal" : readDataDir())
             .append(", state: ").append(readDataState()).append('\n');
