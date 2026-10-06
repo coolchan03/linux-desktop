@@ -57,6 +57,13 @@ relocate_deb() {
             esac
         done
 
+        # dpkg-deb requires maintainer scripts to be executable. On Android's app-data filesystem,
+        # extracting/repacking a .deb can leave these scripts as 0644, which makes repository packages
+        # such as x11-repo and tur-repo fail before their postinst can add the repository.
+        for maint in preinst postinst prerm postrm config; do
+            [ -f "$tree/DEBIAN/$maint" ] && chmod 0755 "$tree/DEBIAN/$maint"
+        done
+
         # Checksums no longer match the edited files.
         rm -f "$tree/DEBIAN/md5sums"
 

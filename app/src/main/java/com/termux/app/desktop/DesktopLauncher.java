@@ -225,6 +225,8 @@ public class DesktopLauncher {
                 "etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh.lock").exists()).append('\n');
         appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
         appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
+        appendTail(out, "repo-x11.log", new File(STATE_DIR, "repo-x11.log"), 30);
+        appendTail(out, "repo-tur.log", new File(STATE_DIR, "repo-tur.log"), 20);
         appendTail(out, "relocate.log", new File(STATE_DIR, "relocate.log"), 30);
         appendTail(out, "gpu.log", new File(STATE_DIR, "gpu.log"), 30);
         appendTail(out, "x11.log", new File(STATE_DIR, "x11.log"), 40);

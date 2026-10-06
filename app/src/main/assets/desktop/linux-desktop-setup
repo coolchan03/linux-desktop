@@ -65,7 +65,14 @@ say "Updating package lists"
 rm -f "$MARK"/failed-*.log
 DEBIAN_FRONTEND=noninteractive pkg update -y
 progress 5 "Adding package repositories"
-for r in x11-repo tur-repo; do DEBIAN_FRONTEND=noninteractive pkg install -y "$r"; done
+if ! DEBIAN_FRONTEND=noninteractive pkg install -y x11-repo >"$MARK/repo-x11.log" 2>&1; then
+  progress 0 "Could not enable the X11 package repository. Tap Copy debug info and send it to the developer."
+  state failed
+  exit 1
+fi
+# TUR is useful for optional/community packages but is not required for the XFCE desktop itself.
+# Do not let a temporary TUR issue prevent the desktop from installing.
+DEBIAN_FRONTEND=noninteractive pkg install -y tur-repo >"$MARK/repo-tur.log" 2>&1 || true
 DEBIAN_FRONTEND=noninteractive pkg update -y
 
 TOTAL=${#CORE[@]}
