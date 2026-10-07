@@ -12,6 +12,19 @@ mkdir -p "$MARK"
 TARGET="$(cat "$MARK/datadir" 2>/dev/null)"
 DIRS=(Documents Downloads Music Pictures Projects Videos)
 status() { echo "$1|$2" > "$MARK/data-state"; }
+PID_FILE="$MARK/data.pid"
+
+# Do not let two storage migrations race with each other.
+if [ -f "$PID_FILE" ]; then
+  old_pid="$(cat "$PID_FILE" 2>/dev/null)"
+  if [ -n "$old_pid" ] && [ -r "/proc/$old_pid/cmdline" ] && tr '\0' ' ' < "/proc/$old_pid/cmdline" | grep -q 'linux-desktop-data'; then
+    status running "A file move is already in progress"
+    exit 0
+  fi
+  rm -f "$PID_FILE"
+fi
+echo $$ > "$PID_FILE"
+trap 'rm -f "$PID_FILE"' EXIT
 
 fail() {
   echo "$*" >&2
@@ -47,9 +60,14 @@ for d in "${DIRS[@]}"; do
   else
     # Back to internal storage.
     [ -L "$src" ] || { mkdir -p "$src"; continue; }
+    tmp="$HOME/.linux-desktop-data-$d.$$"
+    rm -rf "$tmp"
+    mkdir -p "$tmp" || fail "Could not prepare internal storage for $d"
+    if [ -d "$current" ]; then
+      cp -r "$current/." "$tmp/" || { rm -rf "$tmp"; fail "Could not copy $d back to internal storage"; }
+    fi
     rm -f "$src"
-    mkdir -p "$src"
-    [ -d "$current" ] && cp -r "$current/." "$src/" 2>/dev/null
+    mv "$tmp" "$src" || fail "Could not restore $d to internal storage"
   fi
 done
 

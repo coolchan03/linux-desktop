@@ -1,3 +1,15 @@
 #!/data/data/com.termux/files/usr/bin/bash
-pkill -f "termux-x11"; pkill -f xfce; pkill -f pulseaudio; pkill -f dbus-daemon
+MARK="$HOME/.config/linux-desktop"
+X11_SOCKET="${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
+
+# Stop only the desktop/session processes owned by this app's Termux environment.
+pkill -f "termux-x11" 2>/dev/null || true
+pkill -x xfce4-session 2>/dev/null || true
+pkill -x xfdesktop 2>/dev/null || true
+pkill -x xfce4-panel 2>/dev/null || true
+pkill -x xfwm4 2>/dev/null || true
+pulseaudio --kill 2>/dev/null || true
+pkill -f "dbus-daemon.*--session" 2>/dev/null || true
+
+rm -f "$X11_SOCKET" "$MARK/desktop.pid"
 echo "Desktop stopped."

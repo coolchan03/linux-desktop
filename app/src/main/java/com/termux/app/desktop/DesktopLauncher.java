@@ -229,7 +229,10 @@ public class DesktopLauncher {
         out.append("setup state: ").append(p.state).append(" ").append(p.percent).append("% ").append(p.message)
             .append(", process active: ").append(p.active).append('\n');
         out.append("preset: ").append(readFirstLine(PRESET_FILE)).append('\n');
-        out.append("data folder: ").append(readDataDir().isEmpty() ? "internal" : readDataDir())
+        String dataDir = readDataDir();
+        String appliedDataDir = DATA_APPLIED_FILE.exists() ? readFirstLine(DATA_APPLIED_FILE).trim() : "";
+        out.append("data folder requested: ").append(dataDir.isEmpty() ? "internal" : dataDir)
+            .append(", applied: ").append(appliedDataDir.isEmpty() ? "internal" : appliedDataDir)
             .append(", state: ").append(readDataState()).append('\n');
         out.append("extras: ").append(readFirstLine(new File(STATE_DIR, "extras-state"))).append(" / ")
             .append(readFirstLine(new File(STATE_DIR, "extras-progress"))).append('\n');

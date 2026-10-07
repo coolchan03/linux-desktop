@@ -502,7 +502,10 @@ public class DesktopLaunchActivity extends Activity {
 
     private void renderStorage() {
         String dir = DesktopLauncher.readDataDir();
-        mStorageText.setText(dir.isEmpty() ? "Internal storage (default)" : dir);
+        String label = dir.isEmpty() ? "Internal storage (default)" : dir;
+        String state = DesktopLauncher.readDataState();
+        if (state.startsWith("failed|")) label += "\nLast move failed: " + state.substring(7);
+        mStorageText.setText(label);
     }
 
     /** "" means internal storage. The files are moved once the desktop is installed (or right away from the shortcut). */
