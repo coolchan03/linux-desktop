@@ -21,15 +21,26 @@ progress 1 "Preparing the Linux system"
 # Termux normally triggers it from the login shell's startup files, which this background shell never reads,
 # so without this step apt runs on a half-configured system and package installs fail.
 SECOND_STAGE="$PREFIX/etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh"
+SECOND_STAGE_FAILED="$MARK/bootstrap-second-stage-failed"
+
+# Upstream creates .lock before running post-install scripts and leaves it behind if one fails.
+# Only clear that lock when our previous run positively recorded a second-stage failure.
+if [ -f "$SECOND_STAGE_FAILED" ]; then
+  echo "Retrying previously failed Termux bootstrap second stage"
+  rm -f "$SECOND_STAGE.lock"
+fi
+
 if [ -f "$SECOND_STAGE" ] && [ ! -L "$SECOND_STAGE.lock" ]; then
   echo "Running the Termux bootstrap second stage"
   chmod +x "$SECOND_STAGE"
   if ! "$SECOND_STAGE"; then
     echo "Second stage failed" >&2
+    touch "$SECOND_STAGE_FAILED"
     progress 0 "The Linux system could not be finished (base package setup failed). Tap Copy debug info and send it to the developer."
     state failed
     exit 1
   fi
+  rm -f "$SECOND_STAGE_FAILED"
 fi
 
 # Repair anything an earlier attempt left half-installed.
