@@ -2,7 +2,7 @@
 # Installs apps and tools in the background while the desktop is already running.
 # Usage: linux-desktop-extras [minimal|standard|full]   (default: the choice made on first launch)
 #   standard = Firefox, VS Code, git, wget, curl
-#   full     = standard + network/security tools (nmap, hydra, john, sqlmap, metasploit) + Wine on arm64
+#   full     = standard + security/network tools available in the current repositories + Wine on arm64
 
 MARK="$HOME/.config/linux-desktop"
 mkdir -p "$MARK"
@@ -27,7 +27,7 @@ fi
 
 APPS=(firefox code-oss git wget curl)
 TOOLS=(nmap netcat-openbsd whois dnsutils tracepath hydra john sqlmap python)
-[ "$(uname -m)" = aarch64 ] && TOOLS+=(hangover-wine hangover-wowbox64)
+[ "$(uname -m)" = aarch64 ] && TOOLS+=(hangover-wine)
 # Package names and repositories drift over time. Only queue packages that the device's current
 # repositories actually advertise; missing optional tools must never poison the whole extras pass.
 LIST=(); SKIPPED=()

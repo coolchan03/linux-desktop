@@ -28,7 +28,7 @@ Requires **Android 7 or newer**. Allow "install from unknown sources" when your 
 3. Choose what to install:
    - **Minimal**: the desktop only
    - **Standard**: plus Firefox, VS Code, git
-   - **Full**: plus security tools (nmap, hydra, john, sqlmap, Metasploit when available) and Wine on arm64
+   - **Full**: plus available security/network tools from the current repositories and Wine on arm64
 4. The desktop core installs first (about 5-10 minutes, needs internet, Wi-Fi recommended) and opens. Apps install in the background while you use it.
 
 After that, one tap goes straight to the desktop.
@@ -63,7 +63,7 @@ Not moved: your home folder's settings and the Desktop folder, which need real L
 - **Termux add-ons** (Termux:API, Boot, Widget, ...) are tied to the `com.termux` package name and do not work with this app.
 - **Big downloads** (Firefox, VS Code, Wine) take longer because each package is rewritten before installing.
 - **Android 12+** may stop background programs; see the in-app hint about Developer options.
-- Metasploit comes from Termux's unstable repository and may not be available.
+- Full only installs optional security/network packages that the device's current repositories actually provide; unavailable packages are skipped and logged.
 - Requires Android 7+; the older "apt-android-5" bootstrap variant is not built.
 
 ## Troubleshooting
