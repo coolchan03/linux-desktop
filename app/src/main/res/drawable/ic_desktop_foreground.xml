@@ -1,27 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Monitor with a shell prompt, drawn inside the 66dp adaptive-icon safe zone. -->
+<!-- LXDesk: minimal desktop screen with a distinct LX mark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="4"
-        android:strokeLineJoin="round"
-        android:pathData="M33,34 L75,34 Q78,34 78,37 L78,63 Q78,66 75,66 L33,66 Q30,66 30,63 L30,37 Q30,34 33,34 Z" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:pathData="M54,66 L54,75 M42,75 L66,75" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="3.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M40,42 L47,48.5 L40,55 M52,56 L64,56" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="3.5" android:strokeLineJoin="round" android:pathData="M30,32 L78,32 Q81,32 81,35 L81,67 Q81,70 78,70 L30,70 Q27,70 27,67 L27,35 Q27,32 30,32 Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="3.5" android:strokeLineCap="round" android:pathData="M54,70 L54,77 M40,77 L68,77" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M38,43 L38,58 L47,58 M55,43 L68,58 M68,43 L55,58" />
 </vector>
