@@ -708,13 +708,28 @@ public class DesktopLaunchActivity extends Activity {
             showError(Step.START, "Could not start the desktop", "Try again.", this::startDesktop);
             return;
         }
-        // The display waits for the X server to connect, so it can open right away.
-        mHandler.postDelayed(() -> {
+        // The background desktop script opens the embedded X11 activity only after
+        // its server socket is ready. Do not race it with a fixed 1.5-second delay.
+        mDetail.setText("Waiting for the embedded X11 server. If the display does not open, copy the debug information from this screen.");
+        mHandler.postDelayed(() -> pollDesktopStartup(0), 700);
+    }
+
+    private void pollDesktopStartup(int checks) {
+        if (isFinishing() || isDestroyed()) return;
+        String status = DesktopLauncher.readStartState();
+        if (status.startsWith("ready|")) {
             Intent display = new Intent().setClassName(getPackageName(), "com.termux.x11.MainActivity");
-            display.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(display);
             finish();
-        }, 1500);
+        } else if (status.startsWith("failed|")) {
+            mFinished = false;
+            showError(Step.START, "Could not start X11", status.substring(7), this::startDesktop);
+        } else if (checks >= 50) {
+            mFinished = false;
+            showError(Step.START, "X11 startup timed out", "Check the X11 and desktop logs using Copy debug info.", this::startDesktop);
+        } else {
+            mHandler.postDelayed(() -> pollDesktopStartup(checks + 1), 700);
+        }
     }
 
     @Override

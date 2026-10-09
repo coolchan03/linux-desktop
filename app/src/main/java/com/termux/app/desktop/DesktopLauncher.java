@@ -53,6 +53,10 @@ public class DesktopLauncher {
         }
     }
 
+    public static String readStartState() {
+        return readFirstLine(new File(STATE_DIR, "start-state"));
+    }
+
     public static boolean isInstalled() {
         return INSTALLED_MARKER.exists();
     }
@@ -249,6 +253,7 @@ public class DesktopLauncher {
         appendTail(out, "repo-tur.log", new File(STATE_DIR, "repo-tur.log"), 20);
         appendTail(out, "relocate.log", new File(STATE_DIR, "relocate.log"), 30);
         appendTail(out, "gpu.log", new File(STATE_DIR, "gpu.log"), 30);
+        out.append("X11 startup: ").append(readStartState()).append('\n');
         appendTail(out, "x11.log", new File(STATE_DIR, "x11.log"), 40);
         appendTail(out, "desktop.log", new File(STATE_DIR, "desktop.log"), 40);
         // The FIRST failed package is usually the root cause of the later ones, so show it first.
@@ -302,6 +307,7 @@ public class DesktopLauncher {
 
     /** Runs {@code linux-desktop} (X server + XFCE) in a background shell. */
     public static boolean startDesktop(Context context) {
+        new File(STATE_DIR, "start-state").delete();
         return writeScripts(context) && runInBackground(context, "linux-desktop");
     }
 

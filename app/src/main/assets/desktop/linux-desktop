@@ -1,6 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Starts the Linux desktop and shows it in this app's built-in display.
 MARK="$HOME/.config/linux-desktop/installed-v1"
+STATUS="$HOME/.config/linux-desktop/start-state"
+echo "starting|Preparing X11" > "$STATUS"
 # When started by the app (no terminal), keep a log for troubleshooting.
 [ -t 1 ] || exec >>"$HOME/.config/linux-desktop/desktop.log" 2>&1
 
@@ -44,6 +46,7 @@ X11_PID=$!
 tries=0
 while [ ! -S "$X11_SOCKET" ] && [ $tries -lt 150 ]; do
   if ! kill -0 "$X11_PID" 2>/dev/null; then
+    echo "failed|Embedded X11 process exited before readiness. See x11.log" > "$STATUS"
     echo "The embedded X11 server exited before becoming ready."
     exit 1
   fi
@@ -51,13 +54,15 @@ while [ ! -S "$X11_SOCKET" ] && [ $tries -lt 150 ]; do
   tries=$((tries + 1))
 done
 if [ ! -S "$X11_SOCKET" ]; then
+  echo "failed|X11 socket not ready. See x11.log" > "$STATUS"
   echo "The embedded X11 server did not become ready."
   kill "$X11_PID" 2>/dev/null || true
   exit 1
 fi
 export DISPLAY=:0
+echo "ready|X11 socket available; launching desktop" > "$STATUS"
 
 # Bring the built-in display to the front in the Android user/profile that launched this app.
-am start -n @PKG@/com.termux.x11.MainActivity >/dev/null 2>&1
+echo "Launching embedded display from LXDesk activity"
 
 exec dbus-launch --exit-with-session startxfce4
