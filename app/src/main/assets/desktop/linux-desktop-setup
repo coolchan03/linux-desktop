@@ -155,7 +155,25 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   state failed
   exit 1
 fi
-rm -f "$MARK/verify.log"touch "$MARK/installed-v1"
+rm -f "$MARK/verify.log"# Never accept a successful apt exit as proof that the complete desktop is usable.
+# Validate the core executables and dpkg package state before recording success.
+progress 98 "Checking desktop components"
+REQUIRED_COMMANDS=(startxfce4 xfce4-session xfce4-terminal thunar dbus-launch pulseaudio)
+MISSING=()
+for cmd in "${REQUIRED_COMMANDS[@]}"; do
+  command -v "$cmd" >/dev/null 2>&1 || MISSING+=("$cmd")
+done
+for pkgname in "${CORE[@]}"; do
+  [ "$(dpkg-query -W -f='${Status}' "$pkgname" 2>/dev/null)" = "install ok installed" ] || MISSING+=("package:$pkgname")
+done
+if [ ${#MISSING[@]} -gt 0 ]; then
+  printf '%s\n' "${MISSING[@]}" > "$MARK/missing-components.log"
+  rm -f "$MARK/installed-v1"
+  progress 0 "Incomplete desktop installation: ${MISSING[0]}. Tap Try again to repair it."
+  state failed
+  exit 1
+fi
+rm -f "$MARK/missing-components.log"touch "$MARK/installed-v1"
 progress 100 "Done"
 state done
 exit 0

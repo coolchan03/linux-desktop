@@ -251,6 +251,7 @@ public class DesktopLauncher {
                 "etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh.lock").exists()).append('\n');
         appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
         appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
+        appendTail(out, "missing-components.log", new File(STATE_DIR, "missing-components.log"), 30);
         appendTail(out, "verify.log", new File(STATE_DIR, "verify.log"), 30);
         appendTail(out, "repair.log", new File(STATE_DIR, "repair.log"), 30);
         appendTail(out, "update-initial.log", new File(STATE_DIR, "update-initial.log"), 30);
