@@ -220,7 +220,7 @@ public class DesktopLauncher {
         String version = "?";
         try { version = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName; }
         catch (Exception ignored) {}
-        out.append("Linux Desktop ").append(version).append(" (").append(context.getPackageName()).append(")\n")
+        out.append("LXDesk ").append(version).append(" (").append(context.getPackageName()).append(")\n")
             .append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(", Android ").append(Build.VERSION.RELEASE)
             .append(" (SDK ").append(Build.VERSION.SDK_INT).append("), ").append(Build.SUPPORTED_ABIS[0]).append('\n')
             .append("bootstrap installed: ").append(isBootstrapInstalled())
@@ -242,6 +242,9 @@ public class DesktopLauncher {
                 "etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh.lock").exists()).append('\n');
         appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
         appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
+        appendTail(out, "repair.log", new File(STATE_DIR, "repair.log"), 30);
+        appendTail(out, "update-initial.log", new File(STATE_DIR, "update-initial.log"), 30);
+        appendTail(out, "update-final.log", new File(STATE_DIR, "update-final.log"), 30);
         appendTail(out, "repo-x11.log", new File(STATE_DIR, "repo-x11.log"), 30);
         appendTail(out, "repo-tur.log", new File(STATE_DIR, "repo-tur.log"), 20);
         appendTail(out, "relocate.log", new File(STATE_DIR, "relocate.log"), 30);

@@ -48,7 +48,11 @@ repair() {
   DEBIAN_FRONTEND=noninteractive dpkg --configure -a
   DEBIAN_FRONTEND=noninteractive apt-get -f install -y
 }
-repair
+if ! repair >"$MARK/repair.log" 2>&1; then
+  progress 0 "The package manager could not recover. See repair.log for details."
+  state failed
+  exit 1
+fi
 progress 2 "Updating package lists"
 
 TOTAL=0; DONE=0; FAILED=()
@@ -77,7 +81,11 @@ CORE=(procps xorg-xrandr xkeyboard-config xfce4 xfce4-terminal thunar mousepad p
 
 say "Updating package lists"
 rm -f "$MARK"/failed-*.log
-DEBIAN_FRONTEND=noninteractive pkg update -y
+if ! DEBIAN_FRONTEND=noninteractive pkg update -y >"$MARK/update-initial.log" 2>&1; then
+  progress 0 "Could not update package lists. Check your network and repository settings."
+  state failed
+  exit 1
+fi
 progress 5 "Adding package repositories"
 if ! DEBIAN_FRONTEND=noninteractive pkg install -y x11-repo >"$MARK/repo-x11.log" 2>&1; then
   progress 0 "Could not enable the X11 package repository. Tap Copy debug info and send it to the developer."
@@ -87,7 +95,11 @@ fi
 # TUR is useful for optional/community packages but is not required for the XFCE desktop itself.
 # Do not let a temporary TUR issue prevent the desktop from installing.
 DEBIAN_FRONTEND=noninteractive pkg install -y tur-repo >"$MARK/repo-tur.log" 2>&1 || true
-DEBIAN_FRONTEND=noninteractive pkg update -y
+if ! DEBIAN_FRONTEND=noninteractive pkg update -y >"$MARK/update-final.log" 2>&1; then
+  progress 0 "Could not refresh X11 package lists. Check network and repository availability."
+  state failed
+  exit 1
+fi
 
 TOTAL=${#CORE[@]}
 say "Installing the desktop ($TOTAL packages)"
