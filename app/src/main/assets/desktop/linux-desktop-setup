@@ -45,8 +45,11 @@ fi
 
 # Repair anything an earlier attempt left half-installed.
 repair() {
+  # dpkg may initially fail on missing dependencies: apt fixes these, then
+  # finish every pending maintainer script. Only the final result is trusted.
+  DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
+  DEBIAN_FRONTEND=noninteractive apt-get -f install -y || return 1
   DEBIAN_FRONTEND=noninteractive dpkg --configure -a
-  DEBIAN_FRONTEND=noninteractive apt-get -f install -y
 }
 if ! repair >"$MARK/repair.log" 2>&1; then
   progress 0 "The package manager could not recover. See repair.log for details."
@@ -57,22 +60,42 @@ progress 2 "Updating package lists"
 
 TOTAL=0; DONE=0; FAILED=()
 
-say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+say() { printf '\n==> %s\n' "$*"; }
 install_pkg() {
   DONE=$((DONE + 1))
-  progress $((10 + 85 * (DONE - 1) / TOTAL)) "Installing $1 ($DONE of $TOTAL)"
-  printf '\033[0;90m[%d/%d]\033[0m %s ... ' "$DONE" "$TOTAL" "$1"
+  local pkgname="$1" attempt logline ticker pct
+  pct=$((10 + 85 * (DONE - 1) / TOTAL))
   for attempt in 1 2; do
-    if DEBIAN_FRONTEND=noninteractive pkg install -y "$1" >"$MARK/last-pkg.log" 2>&1; then
-      printf '\033[0;32mok\033[0m\n'; return 0
+    : > "$MARK/last-pkg.log"
+    progress "$pct" "Installing $pkgname ($DONE/$TOTAL), attempt $attempt - resolving dependencies"
+    # pkg may install many dependencies for one top-level package. Refresh the
+    # activity text rather than incorrectly increasing a guessed percentage.
+    (
+      elapsed=0
+      while :; do
+        logline="$(tail -c 4096 "$MARK/last-pkg.log" 2>/dev/null | tr '\r' '\n' | grep -E '^(Get:|Fetched |Unpacking |Setting up |Preparing to unpack |Processing triggers|Reading package lists|Building dependency tree)' | tail -n 1 | cut -c1-110)"
+        [ -n "$logline" ] || logline="downloading or configuring dependencies"
+        progress "$pct" "Installing $pkgname ($DONE/$TOTAL), ${elapsed}s - $logline"
+        sleep 3
+        elapsed=$((elapsed + 3))
+      done
+    ) &
+    ticker=$!
+    if DEBIAN_FRONTEND=noninteractive pkg install -y "$pkgname" > "$MARK/last-pkg.log" 2>&1; then
+      kill "$ticker" 2>/dev/null || true
+      wait "$ticker" 2>/dev/null || true
+      progress "$((10 + 85 * DONE / TOTAL))" "Installed $pkgname ($DONE/$TOTAL)"
+      return 0
     fi
-    # Keep every failure: the first one is usually the root cause of the ones after it.
-    cp "$MARK/last-pkg.log" "$MARK/failed-$(printf '%02d' "$DONE")-$1-attempt$attempt.log"
-    repair >>"$MARK/last-pkg.log" 2>&1
+    kill "$ticker" 2>/dev/null || true
+    wait "$ticker" 2>/dev/null || true
+    cp "$MARK/last-pkg.log" "$MARK/failed-$(printf '%02d' "$DONE")-$pkgname-attempt$attempt.log"
+    progress "$pct" "Repairing package manager after $pkgname failed (attempt $attempt)"
+    repair >> "$MARK/last-pkg.log" 2>&1 || true
     sleep 2
   done
-  printf '\033[0;31mfailed\033[0m\n'
-  FAILED+=("$1")
+  FAILED+=("$pkgname")
+  return 0  # Report all failures after the install loop.
 }
 
 # Core packages: keep first boot conservative. Current Termux ships Zink inside the regular mesa package.
@@ -138,43 +161,15 @@ mkdir -p "$HOME/Desktop"
 printf '[Desktop Entry]\nName=Terminal\nExec=xfce4-terminal\nIcon=utilities-terminal\nType=Application\nCategories=System;TerminalEmulator;\n' > "$HOME/Desktop/Terminal.desktop"
 chmod +x "$HOME"/Desktop/*.desktop 2>/dev/null
 
-# A successful pkg exit is not proof that the desktop is usable.
-# Check installed package states and essential commands before advertising success.
-VERIFY_PACKAGES=(xfce4 xfce4-terminal thunar pulseaudio dbus)
-VERIFY_COMMANDS=(startxfce4 xfce4-session xfce4-panel xfwm4 xfdesktop dbus-launch)
-MISSING=()
-for p in "${VERIFY_PACKAGES[@]}"; do
-  [ "$(dpkg-query -W -f='${db:Status-Abbrev}' "$p" 2>/dev/null)" = "ii " ] || MISSING+=("package:$p")
-done
-for c in "${VERIFY_COMMANDS[@]}"; do
-  command -v "$c" >/dev/null 2>&1 || MISSING+=("command:$c")
-done
-if [ ${#MISSING[@]} -gt 0 ]; then
-  printf 'Missing desktop components: %s\n' "${MISSING[*]}" > "$MARK/verify.log"
-  progress 0 "Desktop installation incomplete: ${MISSING[0]}. Retry to repair the missing components."
-  state failed
-  exit 1
-fi
-rm -f "$MARK/verify.log"
-# Never accept a successful apt exit as proof that the complete desktop is usable.
-# Validate the core executables and dpkg package state before recording success.
-progress 98 "Checking desktop components"
-REQUIRED_COMMANDS=(startxfce4 xfce4-session xfce4-terminal thunar dbus-launch pulseaudio)
-MISSING=()
-for cmd in "${REQUIRED_COMMANDS[@]}"; do
-  command -v "$cmd" >/dev/null 2>&1 || MISSING+=("$cmd")
-done
-for pkgname in "${CORE[@]}"; do
-  [ "$(dpkg-query -W -f='${Status}' "$pkgname" 2>/dev/null)" = "install ok installed" ] || MISSING+=("package:$pkgname")
-done
-if [ ${#MISSING[@]} -gt 0 ]; then
-  printf '%s\n' "${MISSING[@]}" > "$MARK/missing-components.log"
+# One authoritative validation path; reruns safely on partial installs.
+progress 98 "Verifying the desktop and its dependencies"
+if ! linux-desktop-verify; then
   rm -f "$MARK/installed-v1"
-  progress 0 "Incomplete desktop installation: ${MISSING[0]}. Tap Try again to repair it."
+  missing="$(sed -n '2p' "$MARK/verify.log" 2>/dev/null)"
+  progress 0 "Desktop setup incomplete: ${missing:-see verify.log}. Tap Try again to repair."
   state failed
   exit 1
 fi
-rm -f "$MARK/missing-components.log"
 touch "$MARK/installed-v1"
 progress 100 "Done"
 state done

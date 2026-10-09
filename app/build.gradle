@@ -45,8 +45,8 @@ android {
         applicationId "com.lxdesk" // Must be exactly as long as "com.termux": see PathRelocator
         minSdkVersion 24 // Termux:X11 (:lorie) requires Android 7+
         targetSdkVersion project.properties.targetSdkVersion.toInteger()
-        versionCode 121
-        versionName "0.121.0"
+        versionCode 122
+        versionName "0.122.0"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)

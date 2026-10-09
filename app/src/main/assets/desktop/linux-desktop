@@ -60,9 +60,21 @@ if [ ! -S "$X11_SOCKET" ]; then
   exit 1
 fi
 export DISPLAY=:0
-echo "ready|X11 socket available; launching desktop" > "$STATUS"
+echo "starting|X11 socket ready; starting XFCE" > "$STATUS"
 
 # Bring the built-in display to the front in the Android user/profile that launched this app.
 echo "Launching embedded display from LXDesk activity"
 
-exec dbus-launch --exit-with-session startxfce4
+dbus-launch --exit-with-session startxfce4 &
+XFCE_PID=$!
+sleep 3
+if ! kill -0 "$XFCE_PID" 2>/dev/null; then
+  echo "failed|XFCE terminated during startup. See desktop.log" > "$STATUS"
+  wait "$XFCE_PID" 2>/dev/null || true
+  exit 1
+fi
+echo "ready|X11 and XFCE are running" > "$STATUS"
+wait "$XFCE_PID"
+RESULT=$?
+echo "failed|XFCE session ended (exit $RESULT). See desktop.log" > "$STATUS"
+exit "$RESULT"

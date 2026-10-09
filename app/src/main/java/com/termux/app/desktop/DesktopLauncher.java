@@ -28,7 +28,7 @@ public class DesktopLauncher {
 
     private static final String LOG_TAG = "DesktopLauncher";
     private static final String ASSET_DIR = "desktop/";
-    private static final String[] SCRIPTS = {"termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-stop"};
+    private static final String[] SCRIPTS = {"termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-stop", "linux-desktop-verify"};
 
     private static final File STATE_DIR = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".config/linux-desktop");
     private static final File INSTALLED_MARKER = new File(STATE_DIR, "installed-v1");
@@ -251,6 +251,8 @@ public class DesktopLauncher {
                 "etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh.lock").exists()).append('\n');
         appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
         appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
+        appendTail(out, "verify.log", new File(STATE_DIR, "verify.log"), 30);
+        appendTail(out, "last-pkg.log", new File(STATE_DIR, "last-pkg.log"), 35);
         appendTail(out, "missing-components.log", new File(STATE_DIR, "missing-components.log"), 30);
         appendTail(out, "verify.log", new File(STATE_DIR, "verify.log"), 30);
         appendTail(out, "repair.log", new File(STATE_DIR, "repair.log"), 30);
