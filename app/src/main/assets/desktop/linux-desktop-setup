@@ -155,7 +155,8 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   state failed
   exit 1
 fi
-rm -f "$MARK/verify.log"# Never accept a successful apt exit as proof that the complete desktop is usable.
+rm -f "$MARK/verify.log"
+# Never accept a successful apt exit as proof that the complete desktop is usable.
 # Validate the core executables and dpkg package state before recording success.
 progress 98 "Checking desktop components"
 REQUIRED_COMMANDS=(startxfce4 xfce4-session xfce4-terminal thunar dbus-launch pulseaudio)
@@ -173,7 +174,8 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   state failed
   exit 1
 fi
-rm -f "$MARK/missing-components.log"touch "$MARK/installed-v1"
+rm -f "$MARK/missing-components.log"
+touch "$MARK/installed-v1"
 progress 100 "Done"
 state done
 exit 0
