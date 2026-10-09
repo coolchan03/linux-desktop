@@ -54,9 +54,14 @@ for d in "${DIRS[@]}"; do
       rm -f "$src"
     elif [ -d "$src" ]; then
       cp -r "$src/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
-      rm -rf "$src"
+      backup="$MARK/backup-$d-$(date +%s)-$$"
+      mv "$src" "$backup" || fail "Could not preserve original $d"
     fi
-    ln -s "$dst" "$src" || fail "Could not link $src"
+    if ! ln -s "$dst" "$src"; then
+      [ -n "${backup:-}" ] && [ -d "$backup" ] && mv "$backup" "$src" 2>/dev/null || true
+      fail "Could not link $src; original was preserved"
+    fi
+    backup=""
   else
     # Back to internal storage.
     [ -L "$src" ] || { mkdir -p "$src"; continue; }
