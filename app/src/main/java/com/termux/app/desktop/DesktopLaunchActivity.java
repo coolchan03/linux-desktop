@@ -43,7 +43,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The app's only launcher entry ("Linux Desktop"). Asks once for optional runtime permissions the desktop
+ * The app's only launcher entry ("LXDesk"). Asks once for optional runtime permissions the desktop
  * and its apps can use (camera, microphone, location, notifications, Bluetooth and media); all-files access
  * is requested only when external storage is selected. It then shows a branded loading screen while it sets up the Linux system, lets you pick what to install,
  * installs the desktop core, starts the X server and XFCE in the background, and opens the built-in
@@ -260,7 +260,7 @@ public class DesktopLaunchActivity extends Activity {
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         content.addView(icon, new LinearLayout.LayoutParams(dp(112), dp(112)));
 
-        TextView title = text("Linux Desktop", 26, COLOR_TEXT);
+        TextView title = text("LXDesk", 26, COLOR_TEXT);
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
         title.setPadding(0, dp(20), 0, dp(4));
@@ -383,7 +383,7 @@ public class DesktopLaunchActivity extends Activity {
         Button debug = button("Copy debug info", false);
         debug.setOnClickListener(v -> {
             ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(ClipData.newPlainText("Linux Desktop debug info", DesktopLauncher.collectDebugInfo(this)));
+            clipboard.setPrimaryClip(ClipData.newPlainText("LXDesk debug info", DesktopLauncher.collectDebugInfo(this)));
             Toast.makeText(this, "Copied. Paste it into your message.", Toast.LENGTH_LONG).show();
         });
         LinearLayout.LayoutParams debugParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
