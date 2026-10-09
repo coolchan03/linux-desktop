@@ -138,7 +138,24 @@ mkdir -p "$HOME/Desktop"
 printf '[Desktop Entry]\nName=Terminal\nExec=xfce4-terminal\nIcon=utilities-terminal\nType=Application\nCategories=System;TerminalEmulator;\n' > "$HOME/Desktop/Terminal.desktop"
 chmod +x "$HOME"/Desktop/*.desktop 2>/dev/null
 
-touch "$MARK/installed-v1"
+# A successful pkg exit is not proof that the desktop is usable.
+# Check installed package states and essential commands before advertising success.
+VERIFY_PACKAGES=(xfce4 xfce4-terminal thunar pulseaudio dbus)
+VERIFY_COMMANDS=(startxfce4 xfce4-session xfce4-panel xfwm4 xfdesktop dbus-launch)
+MISSING=()
+for p in "${VERIFY_PACKAGES[@]}"; do
+  [ "$(dpkg-query -W -f='${db:Status-Abbrev}' "$p" 2>/dev/null)" = "ii " ] || MISSING+=("package:$p")
+done
+for c in "${VERIFY_COMMANDS[@]}"; do
+  command -v "$c" >/dev/null 2>&1 || MISSING+=("command:$c")
+done
+if [ ${#MISSING[@]} -gt 0 ]; then
+  printf 'Missing desktop components: %s\n' "${MISSING[*]}" > "$MARK/verify.log"
+  progress 0 "Desktop installation incomplete: ${MISSING[0]}. Retry to repair the missing components."
+  state failed
+  exit 1
+fi
+rm -f "$MARK/verify.log"touch "$MARK/installed-v1"
 progress 100 "Done"
 state done
 exit 0

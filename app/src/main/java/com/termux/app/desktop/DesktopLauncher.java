@@ -58,7 +58,12 @@ public class DesktopLauncher {
     }
 
     public static boolean isInstalled() {
-        return INSTALLED_MARKER.exists();
+        if (!INSTALLED_MARKER.exists()) return false;
+        String[] required = {"startxfce4", "xfce4-session", "xfce4-panel", "xfwm4", "xfdesktop", "dbus-launch"};
+        for (String executable : required) {
+            if (!new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, executable).canExecute()) return false;
+        }
+        return true;
     }
 
     public static boolean isBootstrapInstalled() {
@@ -246,6 +251,7 @@ public class DesktopLauncher {
                 "etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh.lock").exists()).append('\n');
         appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
         appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
+        appendTail(out, "verify.log", new File(STATE_DIR, "verify.log"), 30);
         appendTail(out, "repair.log", new File(STATE_DIR, "repair.log"), 30);
         appendTail(out, "update-initial.log", new File(STATE_DIR, "update-initial.log"), 30);
         appendTail(out, "update-final.log", new File(STATE_DIR, "update-final.log"), 30);

@@ -6,7 +6,7 @@ echo "starting|Preparing X11" > "$STATUS"
 # When started by the app (no terminal), keep a log for troubleshooting.
 [ -t 1 ] || exec >>"$HOME/.config/linux-desktop/desktop.log" 2>&1
 
-if [ ! -f "$MARK" ]; then
+if [ ! -f "$MARK" ] || ! command -v startxfce4 >/dev/null 2>&1 || ! command -v xfce4-session >/dev/null 2>&1 || ! command -v xfce4-panel >/dev/null 2>&1 || ! command -v dbus-launch >/dev/null 2>&1; then
   echo "First launch: installing your Linux desktop. This takes 15-30 minutes and needs internet."
   linux-desktop-setup || { echo "Setup did not finish."; exit 1; }
 fi
