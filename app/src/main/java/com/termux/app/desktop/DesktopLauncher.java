@@ -445,6 +445,7 @@ public class DesktopLauncher {
             try (InputStream in = context.getAssets().open(ASSET_DIR + name)) {
                 String body = PathRelocator.relocate(new String(readAll(in), StandardCharsets.UTF_8))
                     .replace("@APK_PATH@", apkPath)
+                    .replace("@NATIVE_LIB_DIR@", context.getApplicationInfo().nativeLibraryDir)
                     .replace("@PKG@", context.getPackageName());
                 File out = new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, name);
                 // Always rewritten: the APK path embedded in termux-x11 changes on every app update.

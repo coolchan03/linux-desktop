@@ -189,18 +189,22 @@ public class CmdEntryPoint extends ICmdEntryInterface.Stub {
     private static void initEntryPoint() {
         ctx = createContext();
 
-        String path = "lib/" + Build.SUPPORTED_ABIS[0] + "/libXlorie.so";
-        ClassLoader loader = CmdEntryPoint.class.getClassLoader();
-        URL res = loader != null ? loader.getResource(path) : null;
-        String libPath = res != null ? res.getFile().replace("file:", "") : null;
-        if (libPath != null) {
-            try {
-                System.load(libPath);
-            } catch (Exception e) {
-                Log.e("CmdEntryPoint", "Failed to dlopen " + libPath, e);
-                System.err.println("Failed to load native library. Did you install the right apk? Try the universal one.");
-                System.exit(134);
-            }
+        // app_process does not reliably resolve APK JNI libraries with
+        // ClassLoader.getResource(). LXDesk passes the Android-installed
+        // extracted library path from ApplicationInfo.nativeLibraryDir.
+        String explicitPath = System.getenv("LXDESK_X11_NATIVE_LIB");
+        if (explicitPath == null || explicitPath.isEmpty()) {
+            Log.e("CmdEntryPoint", "LXDESK_X11_NATIVE_LIB not supplied");
+            System.err.println("LXDesk X11: native library path missing");
+            System.exit(134);
+        }
+        try {
+            System.load(explicitPath);
+            Log.i("CmdEntryPoint", "Loaded X11 library from " + explicitPath);
+        } catch (UnsatisfiedLinkError | SecurityException error) {
+            Log.e("CmdEntryPoint", "Unable to load X11 library: " + explicitPath, error);
+            System.err.println("LXDesk X11 native library failed: " + error);
+            System.exit(134);
         }
     }
 }

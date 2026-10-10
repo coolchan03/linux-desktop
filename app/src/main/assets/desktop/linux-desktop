@@ -47,7 +47,8 @@ tries=0
 while [ ! -S "$X11_SOCKET" ] && [ $tries -lt 150 ]; do
   if ! kill -0 "$X11_PID" 2>/dev/null; then
     echo "failed|Embedded X11 process exited before readiness. See x11.log" > "$STATUS"
-    echo "The embedded X11 server exited before becoming ready."
+    wait "$X11_PID" 2>/dev/null; exit_code=$?
+    echo "Embedded X11 exited (code $exit_code). See x11.log and Android logcat."
     exit 1
   fi
   sleep 0.1
