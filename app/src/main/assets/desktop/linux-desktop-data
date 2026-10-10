@@ -1,0 +1,84 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Keeps your own files (Documents, Downloads, Pictures, Music, Videos, Projects) on an SD card or another
+# shared-storage folder. The Linux system itself must stay on internal storage: programs cannot run from
+# SD cards, and they cannot hold the symlinks and permissions Linux needs.
+#
+# The target folder is read from ~/.config/linux-desktop/datadir. Empty means internal storage.
+# Existing files are copied first; nothing is deleted until the copy has succeeded, and data left on the
+# previous location is never removed.
+
+MARK="$HOME/.config/linux-desktop"
+mkdir -p "$MARK"
+TARGET="$(cat "$MARK/datadir" 2>/dev/null)"
+DIRS=(Documents Downloads Music Pictures Projects Videos)
+status() { echo "$1|$2" > "$MARK/data-state"; }
+PID_FILE="$MARK/data.pid"
+
+# Do not let two storage migrations race with each other.
+if [ -f "$PID_FILE" ]; then
+  old_pid="$(cat "$PID_FILE" 2>/dev/null)"
+  if [ -n "$old_pid" ] && [ -r "/proc/$old_pid/cmdline" ] && tr '\0' ' ' < "/proc/$old_pid/cmdline" | grep -q 'linux-desktop-data'; then
+    status running "A file move is already in progress"
+    exit 0
+  fi
+  rm -f "$PID_FILE"
+fi
+echo $$ > "$PID_FILE"
+trap 'rm -f "$PID_FILE"' EXIT
+
+fail() {
+  echo "$*" >&2
+  status failed "$*"
+  exit 1
+}
+
+status running "Moving your files"
+
+if [ -n "$TARGET" ]; then
+  mkdir -p "$TARGET" 2>/dev/null
+  [ -d "$TARGET" ] && [ -w "$TARGET" ] || fail "Cannot write to $TARGET. Check selected-folder permission; SD card may be mounted but inaccessible."
+  PROBE="$TARGET/.lxdesk-write-test-$$"
+  (umask 077; : > "$PROBE") 2>/dev/null || fail "Selected storage is mounted but refuses file writes: $TARGET"
+  rm -f "$PROBE"
+fi
+
+for d in "${DIRS[@]}"; do
+  src="$HOME/$d"
+  current=""
+  [ -L "$src" ] && current="$(readlink "$src")"
+
+  if [ -n "$TARGET" ]; then
+    dst="$TARGET/$d"
+    [ "$current" = "$dst" ] && continue
+    mkdir -p "$dst" || fail "Cannot create $dst"
+    if [ -L "$src" ]; then
+      # Was stored somewhere else before: copy it across, leave the old copy alone.
+      [ -d "$current" ] || fail "Existing $d storage is unavailable: $current. Not replacing the link."
+      cp -r "$current/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
+      rm -f "$src"
+    elif [ -d "$src" ]; then
+      cp -r "$src/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
+      backup="$MARK/backup-$d-$(date +%s)-$$"
+      mv "$src" "$backup" || fail "Could not preserve original $d"
+    fi
+    if ! ln -s "$dst" "$src"; then
+      [ -n "${backup:-}" ] && [ -d "$backup" ] && mv "$backup" "$src" 2>/dev/null || true
+      fail "Could not link $src; original was preserved"
+    fi
+    backup=""
+  else
+    # Back to internal storage.
+    [ -L "$src" ] || { mkdir -p "$src"; continue; }
+    tmp="$HOME/.linux-desktop-data-$d.$$"
+    rm -rf "$tmp"
+    mkdir -p "$tmp" || fail "Could not prepare internal storage for $d"
+    [ -d "$current" ] || { rm -rf "$tmp"; fail "Previous $d storage is unavailable: $current. Files were not changed."; }
+    cp -r "$current/." "$tmp/" || { rm -rf "$tmp"; fail "Could not copy $d back to internal storage"; }
+    rm -f "$src"
+    mv "$tmp" "$src" || fail "Could not restore $d to internal storage"
+  fi
+done
+
+echo "$TARGET" > "$MARK/datadir-applied"
+status done "Your files are now stored in ${TARGET:-internal storage}"
+exit 0

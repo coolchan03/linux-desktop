@@ -18,24 +18,33 @@
         tools:targetApi="n_mr1">
         <intent
             android:action="android.intent.action.RUN"
-            android:targetPackage="com.termux"
+            android:targetPackage="com.lxdesk"
             android:targetClass="com.termux.app.TermuxActivity"
             android:name="android.shortcut.conversation"/>
     </shortcut>
 
     <shortcut
-        android:shortcutId="new_failsafe_session"
+        android:shortcutId="data_folder"
         android:enabled="true"
-        android:icon="@drawable/ic_new_session"
-        android:shortcutShortLabel="@string/action_new_session_failsafe"
+        android:icon="@drawable/ic_settings"
+        android:shortcutShortLabel="@string/action_data_folder"
         tools:targetApi="n_mr1">
         <intent
-            android:action="android.intent.action.RUN"
-            android:targetPackage="com.termux"
-            android:targetClass="com.termux.app.TermuxActivity"
-            android:name="android.shortcut.conversation">
-            <extra android:name="com.termux.app.failsafe_session" android:value="true"/>
-        </intent>
+            android:action="com.termux.app.desktop.DATA_FOLDER"
+            android:targetPackage="com.lxdesk"
+            android:targetClass="com.termux.app.desktop.DesktopLaunchActivity" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="stop_desktop"
+        android:enabled="true"
+        android:icon="@drawable/ic_new_session"
+        android:shortcutShortLabel="@string/action_stop_desktop"
+        tools:targetApi="n_mr1">
+        <intent
+            android:action="com.termux.app.desktop.STOP_DESKTOP"
+            android:targetPackage="com.lxdesk"
+            android:targetClass="com.termux.app.desktop.DesktopLaunchActivity" />
     </shortcut>
 
     <shortcut
@@ -46,7 +55,7 @@
         tools:targetApi="n_mr1">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.termux"
+            android:targetPackage="com.lxdesk"
             android:targetClass="com.termux.app.activities.SettingsActivity"
             android:name="android.shortcut.conversation"/>
     </shortcut>

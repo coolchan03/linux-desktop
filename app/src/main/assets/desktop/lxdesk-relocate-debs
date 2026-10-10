@@ -1,0 +1,98 @@
+#!@PREFIX@/bin/sh
+# apt "Pre-Install-Pkgs" hook. Termux's packages are built for /data/data/com.termux. This app lives
+# in /data/data/@NEW_PKG@ (same length), so each .deb apt is about to install is rewritten first:
+# the data/data/com.termux directory is renamed and every occurrence of the old path inside files,
+# scripts and symlinks is replaced. Native binaries (including the GPU drivers) keep working.
+#
+# apt passes the .deb paths on stdin, one per line. Run it by hand for a deb installed with dpkg -i:
+#   echo foo.deb | lxdesk-relocate-debs
+
+OLD_PKG="com.termux"
+NEW_PKG="@NEW_PKG@"
+[ "$OLD_PKG" = "$NEW_PKG" ] && exit 0
+
+export LC_ALL=C
+LOG="$HOME/.config/linux-desktop/relocate.log"
+mkdir -p "$(dirname "$LOG")" 2>/dev/null
+log() { echo "$(date '+%H:%M:%S') $*" >> "$LOG" 2>/dev/null; }
+OLD_RE="/data/\(data\|user/0\)/com\.termux"
+NEW_SUB="/data/\1/$NEW_PKG"
+
+relocate_deb() {
+    deb=$1
+    base="${TMPDIR:-@PREFIX@/tmp}"
+
+    # Unpacking and repacking needs a few times the package size. Fail clearly instead of
+    # filling the storage and leaving a half-installed package.
+    size_kb=$(( $(wc -c < "$deb") / 1024 ))
+    free_kb=$(df -Pk "$base" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -n "$free_kb" ] && [ "$free_kb" -lt $(( size_kb * 5 + 100000 )) ]; then
+        echo "lxdesk: not enough free storage to prepare $(basename "$deb") (need about $(( (size_kb * 5 + 100000) / 1024 )) MB, have $(( free_kb / 1024 )) MB)." >&2
+        return 1
+    fi
+
+    tmp=$(mktemp -d "$base/relocate.XXXXXX") || { log "mktemp failed in $base"; echo "lxdesk: cannot create a temporary folder in $base" >&2; return 1; }
+    tree="$tmp/tree"
+    log "relocating $(basename "$deb") ($size_kb KB, $((free_kb / 1024)) MB free)"
+
+    if dpkg-deb -R "$deb" "$tree" 2>"$tmp/err"; then
+        for root in data/data data/user/0; do
+            if [ -d "$tree/$root/$OLD_PKG" ]; then
+                mkdir -p "$tree/$root"
+                mv "$tree/$root/$OLD_PKG" "$tree/$root/$NEW_PKG"
+            fi
+        done
+
+        # Regular files (grep -r does not follow symlinks, so symlinks are never rewritten here).
+        grep -rla "$OLD_RE" "$tree" 2>/dev/null | while IFS= read -r file; do
+            [ -L "$file" ] || sed -i "s#$OLD_RE#$NEW_SUB#g" "$file"
+        done
+
+        # Absolute symlinks pointing into the old location.
+        find "$tree" -type l | while IFS= read -r link; do
+            target=$(readlink "$link")
+            case $target in
+                */data/data/$OLD_PKG*|*/data/user/0/$OLD_PKG*)
+                    ln -sfn "$(printf '%s' "$target" | sed "s#$OLD_RE#$NEW_SUB#g")" "$link" ;;
+            esac
+        done
+
+        # dpkg-deb requires maintainer scripts to be executable. On Android's app-data filesystem,
+        # extracting/repacking a .deb can leave these scripts as 0644, which makes repository packages
+        # such as x11-repo and tur-repo fail before their postinst can add the repository.
+        for maint in preinst postinst prerm postrm config; do
+            [ -f "$tree/DEBIAN/$maint" ] && chmod 0755 "$tree/DEBIAN/$maint"
+        done
+
+        # Checksums no longer match the edited files.
+        rm -f "$tree/DEBIAN/md5sums"
+
+        if dpkg-deb -Znone --root-owner-group -b "$tree" "$tmp/new.deb" >/dev/null 2>"$tmp/err" ||
+           dpkg-deb -Znone -b "$tree" "$tmp/new.deb" >/dev/null 2>>"$tmp/err"; then
+            rm -rf "$tree"                      # free the unpacked copy before replacing the deb
+            mv -f "$tmp/new.deb" "$deb" 2>/dev/null || cat "$tmp/new.deb" > "$deb"
+            log "done $(basename "$deb")"
+        else
+            log "REPACK FAILED $(basename "$deb"): $(head -3 "$tmp/err" | tr '\n' ' ')"
+            echo "lxdesk: could not repack $(basename "$deb"): $(head -3 "$tmp/err" | tr '\n' ' ')" >&2
+            rm -rf "$tmp"
+            return 1
+        fi
+    else
+        log "UNPACK FAILED $(basename "$deb"): $(head -3 "$tmp/err" | tr '\n' ' ')"
+        echo "lxdesk: could not unpack $(basename "$deb"): $(head -3 "$tmp/err" | tr '\n' ' ')" >&2
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    rm -rf "$tmp"
+    return 0
+}
+
+status=0
+while IFS= read -r line; do
+    case $line in
+        *.deb) [ -f "$line" ] && { relocate_deb "$line" || status=1; } ;;
+    esac
+done
+exit $status

@@ -38,21 +38,23 @@ android {
 
         implementation project(":terminal-view")
         implementation project(":termux-shared")
+        implementation project(":lorie") // Termux:X11 display server, embedded so the desktop runs inside this app
     }
 
     defaultConfig {
-        minSdkVersion project.properties.minSdkVersion.toInteger()
+        applicationId "com.lxdesk" // Must be exactly as long as "com.termux": see PathRelocator
+        minSdkVersion 24 // Termux:X11 (:lorie) requires Android 7+
         targetSdkVersion project.properties.targetSdkVersion.toInteger()
-        versionCode 118
-        versionName "0.118.0"
+        versionCode 126
+        versionName "0.126.0"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
 
         buildConfigField "String", "TERMUX_PACKAGE_VARIANT", "\"" + project.ext.packageVariant + "\"" // Used by TermuxApplication class
 
-        manifestPlaceholders.TERMUX_PACKAGE_NAME = "com.termux"
-        manifestPlaceholders.TERMUX_APP_NAME = "Termux"
+        manifestPlaceholders.TERMUX_PACKAGE_NAME = "com.lxdesk"
+        manifestPlaceholders.TERMUX_APP_NAME = "LXDesk"
         manifestPlaceholders.TERMUX_API_APP_NAME = "Termux:API"
         manifestPlaceholders.TERMUX_BOOT_APP_NAME = "Termux:Boot"
         manifestPlaceholders.TERMUX_FLOAT_APP_NAME = "Termux:Float"

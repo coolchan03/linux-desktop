@@ -1,0 +1,101 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Starts the Linux desktop and shows it in this app's built-in display.
+MARK="$HOME/.config/linux-desktop/installed-v1"
+STATUS="$HOME/.config/linux-desktop/start-state"
+echo "starting|Preparing X11" > "$STATUS"
+# When started by the app (no terminal), keep a log for troubleshooting.
+[ -t 1 ] || exec >>"$HOME/.config/linux-desktop/desktop.log" 2>&1
+
+if [ ! -f "$MARK" ] || ! command -v startxfce4 >/dev/null 2>&1 || ! command -v xfce4-session >/dev/null 2>&1 || ! command -v xfce4-panel >/dev/null 2>&1 || ! command -v dbus-launch >/dev/null 2>&1; then
+  echo "First launch: installing your Linux desktop. This takes 15-30 minutes and needs internet."
+  linux-desktop-setup || { echo "Setup did not finish."; exit 1; }
+fi
+
+# Already running (e.g. the icon was tapped again): the app just reopens the display.
+PIDFILE="$HOME/.config/linux-desktop/desktop.pid"
+# (Also check the process really is the desktop: Android can reuse process IDs.)
+if [ -f "$PIDFILE" ] && pid="$(cat "$PIDFILE")" && kill -0 "$pid" 2>/dev/null \
+   && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q 'startxfce4'; then
+  exit 0
+fi
+echo $$ > "$PIDFILE"
+
+source "$HOME/.config/hacklab-gpu.sh" 2>/dev/null
+
+pkill -f "termux-x11" 2>/dev/null
+pkill -f "xfce" 2>/dev/null
+pulseaudio --kill 2>/dev/null
+sleep 0.5
+
+unset PULSE_SERVER
+pulseaudio --start --exit-idle-time=-1
+pactl load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1 auth-anonymous=1 2>/dev/null
+export PULSE_SERVER=127.0.0.1
+
+# Apps and tools install in the background so the desktop appears as soon as the core is ready.
+(linux-desktop-extras >/dev/null 2>&1 &)
+
+X11_LOG="$HOME/.config/linux-desktop/x11.log"
+: > "$X11_LOG"
+X11_SOCKET="${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
+# A crashed X server can leave the Unix socket node behind. Do not mistake that stale file for a
+# newly-ready server on the next launch.
+rm -f "$X11_SOCKET" 2>/dev/null
+termux-x11 :0 -ac >>"$X11_LOG" 2>&1 &
+X11_PID=$!
+tries=0
+while [ ! -S "$X11_SOCKET" ] && [ $tries -lt 150 ]; do
+  if ! kill -0 "$X11_PID" 2>/dev/null; then
+    echo "failed|Embedded X11 process exited before readiness. See x11.log" > "$STATUS"
+    wait "$X11_PID" 2>/dev/null; exit_code=$?
+    echo "Embedded X11 exited (code $exit_code). See x11.log and Android logcat."
+    exit 1
+  fi
+  sleep 0.1
+  tries=$((tries + 1))
+done
+if [ ! -S "$X11_SOCKET" ]; then
+  echo "failed|X11 socket not ready. See x11.log" > "$STATUS"
+  echo "The embedded X11 server did not become ready."
+  kill "$X11_PID" 2>/dev/null || true
+  exit 1
+fi
+# Expose Android's shared storage using ordinary filesystem links. Linux
+# apps inherit Android's storage sandbox; protected /data and /system paths
+# remain inaccessible without root.
+mkdir -p "$HOME/Desktop" "$HOME/.local/share" "$PREFIX/tmp"
+ln -sfn /storage "$HOME/Android-Storage"
+[ -d /storage/emulated/0 ] && ln -sfn /storage/emulated/0 "$HOME/Android-Internal"
+# Use Thunar's native launcher: no substitute/custom file browser.
+printf '[Desktop Entry]\nType=Application\nName=Android storage\nExec=thunar %s\nIcon=folder\nTerminal=false\n' "$HOME/Android-Storage" > "$HOME/Desktop/Android-Storage.desktop"
+printf '[Desktop Entry]\nType=Application\nName=File Manager\nExec=thunar\nIcon=system-file-manager\nTerminal=false\n' > "$HOME/Desktop/File-Manager.desktop"
+chmod 755 "$HOME/Desktop/"*.desktop
+export XDG_RUNTIME_DIR="${TMPDIR:-$PREFIX/tmp}"
+export XDG_DATA_DIRS="$PREFIX/share:/usr/local/share:/usr/share"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+# Capture failures from standard programs to help diagnose broken app launches.
+for app in thunar xfce4-terminal dbus-launch; do
+  if ! command -v "$app" >/dev/null 2>&1; then
+    echo "Missing desktop executable: $app" >> "$HOME/.config/linux-desktop/desktop-apps.log"
+  fi
+done
+export DISPLAY=:0
+echo "starting|X11 socket ready; starting XFCE" > "$STATUS"
+
+# Bring the built-in display to the front in the Android user/profile that launched this app.
+echo "Launching embedded display from LXDesk activity"
+
+dbus-launch --exit-with-session startxfce4 &
+XFCE_PID=$!
+sleep 3
+if ! kill -0 "$XFCE_PID" 2>/dev/null; then
+  echo "failed|XFCE terminated during startup. See desktop.log" > "$STATUS"
+  wait "$XFCE_PID" 2>/dev/null || true
+  exit 1
+fi
+echo "ready|X11 and XFCE are running" > "$STATUS"
+wait "$XFCE_PID"
+RESULT=$?
+echo "failed|XFCE session ended (exit $RESULT). See desktop.log" > "$STATUS"
+exit "$RESULT"

@@ -1,0 +1,79 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Installs apps and tools in the background while the desktop is already running.
+# Usage: linux-desktop-extras [minimal|standard|full]   (default: the choice made on first launch)
+#   standard = Firefox, VS Code, git, wget, curl
+#   full     = standard + security/network tools available in the current repositories + Wine on arm64
+
+MARK="$HOME/.config/linux-desktop"
+mkdir -p "$MARK"
+[ -n "$1" ] && echo "$1" > "$MARK/preset"
+PRESET="$(cat "$MARK/preset" 2>/dev/null || echo standard)"
+progress() { echo "$1|$2" > "$MARK/extras-progress"; }
+
+[ -f "$MARK/extras-done-$PRESET" ] && exit 0
+PIDFILE="$MARK/extras.pid"
+if [ -f "$PIDFILE" ] && pid="$(cat "$PIDFILE" 2>/dev/null)" && kill -0 "$pid" 2>/dev/null \
+   && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q 'linux-desktop-extras'; then
+  exit 0
+fi
+echo $$ > "$PIDFILE"
+trap 'rm -f "$PIDFILE"' EXIT
+if [ "$PRESET" = minimal ]; then
+  touch "$MARK/extras-done-minimal"
+  echo done > "$MARK/extras-state"
+  progress 100 "Desktop-only preset selected"
+  exit 0
+fi
+
+APPS=(firefox code-oss git wget curl)
+TOOLS=(nmap netcat-openbsd whois dnsutils tracepath hydra john sqlmap python)
+[ "$(uname -m)" = aarch64 ] && TOOLS+=(hangover-wine)
+# Package names and repositories drift over time. Only queue packages that the device's current
+# repositories actually advertise; missing optional tools must never poison the whole extras pass.
+LIST=(); SKIPPED=()
+queue_if_available() {
+  if apt-cache show "$1" >/dev/null 2>&1; then LIST+=("$1"); else SKIPPED+=("$1"); fi
+}
+for p in "${APPS[@]}"; do queue_if_available "$p"; done
+if [ "$PRESET" = full ]; then
+  TOOLS+=(metasploit)
+  for p in "${TOOLS[@]}"; do queue_if_available "$p"; done
+fi
+printf '%s\n' "${SKIPPED[@]}" > "$MARK/extras-skipped.log"
+
+FAILED=(); N=0; TOTAL=${#LIST[@]}
+echo running > "$MARK/extras-state"
+for p in "${LIST[@]}"; do
+  N=$((N + 1))
+  progress $((100 * (N - 1) / TOTAL)) "Installing $p ($N of $TOTAL)"
+  ok=0
+  for attempt in 1 2; do
+    if DEBIAN_FRONTEND=noninteractive pkg install -y "$p" >"$MARK/last-extra.log" 2>&1; then ok=1; break; fi
+    sleep 2
+  done
+  if [ $ok = 0 ]; then FAILED+=("$p"); cp "$MARK/last-extra.log" "$MARK/failed-$p.log"; fi
+done
+
+if [ "$PRESET" = full ] && command -v python >/dev/null 2>&1; then
+  python -m pip install requests beautifulsoup4 >/dev/null 2>&1 || true
+fi
+
+mkdir -p "$HOME/Desktop"
+mk() { printf '[Desktop Entry]\nName=%s\nExec=%s\nIcon=%s\nType=Application\nCategories=%s;\n' "$1" "$2" "$3" "$4" > "$HOME/Desktop/$1.desktop"; }
+command -v firefox  >/dev/null && mk Firefox "firefox" firefox "Network;WebBrowser"
+command -v code-oss >/dev/null && mk "VS Code" "code-oss --no-sandbox" code-oss "Development"
+command -v hangover-wine >/dev/null && mk "Wine Config" "hangover-wine winecfg" wine "Settings"
+command -v msfconsole >/dev/null && mk "Metasploit" "xfce4-terminal -e msfconsole" utilities-terminal "Security"
+chmod +x "$HOME"/Desktop/*.desktop 2>/dev/null
+
+if [ ${#FAILED[@]} -eq 0 ] && [ ${#SKIPPED[@]} -eq 0 ]; then
+  touch "$MARK/extras-done-$PRESET"; echo done > "$MARK/extras-state"; progress 100 "All selected apps installed"
+elif [ ${#FAILED[@]} -eq 0 ]; then
+  touch "$MARK/extras-done-$PRESET"
+  echo "partial: unavailable ${SKIPPED[*]}" > "$MARK/extras-state"
+  progress 100 "Installed available apps; unavailable: ${SKIPPED[*]}"
+else
+  echo "partial: failed ${FAILED[*]}; unavailable ${SKIPPED[*]}" > "$MARK/extras-state"
+  progress 100 "Some apps failed: ${FAILED[*]}"
+fi
+exit 0

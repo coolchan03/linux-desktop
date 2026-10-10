@@ -1,3 +1,92 @@
+# LXDesk — Linux Desktop for Android
+
+A full Linux desktop (XFCE) on your Android phone, in **one app**. Tap one icon; no separate terminal app and display app.
+
+It combines three projects:
+
+| Project | What it provides here |
+|---|---|
+| [termux-app](https://github.com/termux/termux-app) | The terminal and Linux userland this repository is forked from |
+| [termux-x11](https://github.com/termux/termux-x11) | The X server and display, built in as the `:lorie` module instead of a second app |
+| [termux-hacklab](https://github.com/techjarves/termux-hacklab) | The package selection: XFCE4, Turnip/Zink GPU drivers, audio, Firefox, VS Code, security tools, Wine |
+
+> **Status: early release.** CI builds it and runs the unit tests, and the install scripts were checked in a sandbox, but real-device testing is still in progress. If something goes wrong, see [Troubleshooting](#troubleshooting).
+
+## Download
+
+Get the latest APK from the **[Releases page](../../releases)** (`latest-<branch>` tag).
+
+- `linux-desktop-arm64-v8a.apk` for almost every phone
+- `linux-desktop-universal.apk` (larger) for any device
+
+Requires **Android 7 or newer**. Allow "install from unknown sources" when your browser asks. Android may show a one-time "built for an older version of Android" warning; see [Known limitations](#known-limitations).
+
+## First run
+
+1. Open **LXDesk** and answer the optional permission prompts for camera, microphone, location, notifications, Bluetooth and media. **All-files access is only requested if you choose an SD card or another external folder for your files.**
+2. A loading screen walks through three steps: **prepare the Linux system**, **install the desktop**, **start the desktop**, and always says what it is doing right now.
+3. Choose what to install:
+   - **Minimal**: the desktop only
+   - **Standard**: plus Firefox, VS Code, git
+   - **Full**: plus available security/network tools from the current repositories and Wine on arm64
+4. The desktop core installs first (about 5-10 minutes, needs internet, Wi-Fi recommended) and opens. Apps install in the background while you use it.
+
+After that, one tap goes straight to the desktop.
+
+## Features
+
+- **GPU acceleration** with Turnip/Zink (Adreno GPUs) or a software Vulkan fallback, using Termux's native packages.
+- **Runs next to the official Termux.** This app is `com.lxdesk`, so it does not replace or conflict with `com.termux`.
+- **Own storage location** for your files: internal storage, an SD card, or any folder (see [Where your files are stored](#where-your-files-are-stored)).
+- **Long-press the icon** for: *New session* (plain terminal), *Storage location*, *Stop desktop*, *Settings*.
+- **Copy debug info** button on the loading screen: one tap copies device info, setup state and the relevant logs.
+- **Phone-friendly defaults**: scaled display resolution, fullscreen, trackpad touch mode. Change them in the display settings.
+- **Keeps running**: asks for the battery-optimization exemption and explains Android's child-process limit (Android 12+).
+
+## Where your files are stored
+
+The Linux system (programs, libraries, settings) always lives on **internal storage**: Android does not allow programs to run from an SD card, and SD cards cannot hold the symlinks and permissions Linux needs. Expect roughly 3 GB (Minimal), 5 GB (Standard) or 9 GB (Full).
+
+Your **own files** can live elsewhere. Open the icon's **Storage location** shortcut (or choose during first run) to keep `Documents`, `Downloads`, `Pictures`, `Music`, `Videos` and `Projects` on an SD card or in a folder you pick. Files are copied first, nothing is deleted until the copy succeeds, and old data is never removed from the previous place. Needs "All files access". If the card is missing at launch you are asked whether to start anyway or use internal storage.
+
+Not moved: your home folder's settings and the Desktop folder, which need real Linux file permissions.
+
+## How it works
+
+- Termux's official bootstrap and packages have `/data/data/com.termux` compiled in. This app's package name `com.lxdesk` is exactly the same length, so the path is rewritten in place: in every bootstrap file as it is unpacked, and in every package by an apt hook (`lxdesk-relocate-debs`) before `dpkg` installs it. Packages stay native, so GPU drivers work.
+- The X server runs from the app's own APK (`termux-x11` wrapper script, `app_process`), so there is no second app or loader package.
+- Setup scripts (`linux-desktop-setup`, `-extras`, `-data`, `-stop`, `linux-desktop`) are bundled in `app/src/main/assets/desktop/` and run as background Termux shells; the loading screen reads their progress files.
+
+## Known limitations
+
+- **"Built for an older version of Android" warning** on newer Android versions. Termux targets Android 9 (SDK 28) on purpose, because newer targets stop programs from running out of the app's storage. This app has no alternative way to start programs yet, so the target is not raised.
+- **Termux add-ons** (Termux:API, Boot, Widget, ...) are tied to the `com.termux` package name and do not work with this app.
+- **Big downloads** (Firefox, VS Code, Wine) take longer because each package is rewritten before installing.
+- **Android 12+** may stop background programs; see the in-app hint about Developer options.
+- Full only installs optional security/network packages that the device's current repositories actually provide; unavailable packages are skipped and logged.
+- Requires Android 7+; the older "apt-android-5" bootstrap variant is not built.
+
+## Troubleshooting
+
+- Tap **Copy debug info** on the loading screen and paste it into an issue or message.
+- Logs live in `~/.config/linux-desktop/` (`desktop.log`, `failed-<package>.log`) inside the app's terminal (long-press the icon, *New session*).
+- A package that failed to install can be retried with `pkg install <name>`. For a package installed manually with `dpkg -i`, run `echo file.deb | lxdesk-relocate-debs` first.
+
+## Building from source
+
+```
+git submodule update --init --recursive   # X server sources
+./gradlew assembleDebug
+```
+
+GitHub Actions does this on every push and publishes the APKs as a pre-release. The package name must stay exactly as long as `com.termux` (10 characters); the app refuses to start otherwise.
+
+## Credits and licenses
+
+Built on [Termux](https://github.com/termux/termux-app) (GPLv3), [Termux:X11](https://github.com/termux/termux-x11) (GPLv3) and the package selection of [Mobile HackLab](https://github.com/techjarves/termux-hacklab) by Tech Jarves. See `LICENSE.md`. The text below is the unmodified upstream Termux README; where it conflicts with the above (package name, installation sources, plugin apps), this fork follows the sections above.
+
+---
+
 # Termux application
 
 [![Build status](https://github.com/termux/termux-app/workflows/Build/badge.svg)](https://github.com/termux/termux-app/actions)
