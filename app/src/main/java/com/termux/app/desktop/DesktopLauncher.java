@@ -130,6 +130,14 @@ public class DesktopLauncher {
     @SuppressWarnings("deprecation")
     public static void applyDisplayDefaults(Context context) {
         android.content.SharedPreferences flags = context.getSharedPreferences("desktop_launcher", Context.MODE_PRIVATE);
+        // Apply the extra-key bar preference separately for existing installations.
+        // Do not overwrite a user choice already saved in X11 preferences.
+        android.content.SharedPreferences prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(context);
+        if (!flags.getBoolean("lxdesk_extra_keys_default_v1", false)) {
+            if (!prefs.contains("showAdditionalKbd"))
+                prefs.edit().putBoolean("showAdditionalKbd", true).putBoolean("additionalKbdVisible", false).apply();
+            flags.edit().putBoolean("lxdesk_extra_keys_default_v1", true).apply();
+        }
         if (flags.getBoolean("display_defaults_applied", false)) return;
         android.preference.PreferenceManager.getDefaultSharedPreferences(context).edit()
             .putString("displayResolutionMode", "scaled")
