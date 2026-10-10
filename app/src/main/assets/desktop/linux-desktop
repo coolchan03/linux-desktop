@@ -60,6 +60,26 @@ if [ ! -S "$X11_SOCKET" ]; then
   kill "$X11_PID" 2>/dev/null || true
   exit 1
 fi
+# Expose Android's shared storage using ordinary filesystem links. Linux
+# apps inherit Android's storage sandbox; protected /data and /system paths
+# remain inaccessible without root.
+mkdir -p "$HOME/Desktop" "$HOME/.local/share" "$PREFIX/tmp"
+ln -sfn /storage "$HOME/Android-Storage"
+[ -d /storage/emulated/0 ] && ln -sfn /storage/emulated/0 "$HOME/Android-Internal"
+# Use Thunar's native launcher: no substitute/custom file browser.
+printf '[Desktop Entry]\nType=Application\nName=Android storage\nExec=thunar %s\nIcon=folder\nTerminal=false\n' "$HOME/Android-Storage" > "$HOME/Desktop/Android-Storage.desktop"
+printf '[Desktop Entry]\nType=Application\nName=File Manager\nExec=thunar\nIcon=system-file-manager\nTerminal=false\n' > "$HOME/Desktop/File-Manager.desktop"
+chmod 755 "$HOME/Desktop/"*.desktop
+export XDG_RUNTIME_DIR="${TMPDIR:-$PREFIX/tmp}"
+export XDG_DATA_DIRS="$PREFIX/share:/usr/local/share:/usr/share"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+# Capture failures from standard programs to help diagnose broken app launches.
+for app in thunar xfce4-terminal dbus-launch; do
+  if ! command -v "$app" >/dev/null 2>&1; then
+    echo "Missing desktop executable: $app" >> "$HOME/.config/linux-desktop/desktop-apps.log"
+  fi
+done
 export DISPLAY=:0
 echo "starting|X11 socket ready; starting XFCE" > "$STATUS"
 

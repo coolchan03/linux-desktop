@@ -330,6 +330,7 @@ public class DesktopLauncher {
         out.append("X11 startup: ").append(readStartState()).append('\n');
         appendTail(out, "x11.log", new File(STATE_DIR, "x11.log"), 40);
         appendTail(out, "desktop.log", new File(STATE_DIR, "desktop.log"), 40);
+        appendTail(out, "desktop-apps.log", new File(STATE_DIR, "desktop-apps.log"), 40);
         // The FIRST failed package is usually the root cause of the later ones, so show it first.
         File[] failed = STATE_DIR.listFiles((dir, name) -> name.startsWith("failed-") && name.endsWith(".log"));
         if (failed != null && failed.length > 0) {
