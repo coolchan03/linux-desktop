@@ -36,7 +36,10 @@ status running "Moving your files"
 
 if [ -n "$TARGET" ]; then
   mkdir -p "$TARGET" 2>/dev/null
-  [ -d "$TARGET" ] && [ -w "$TARGET" ] || fail "Cannot write to $TARGET. Check that the card is inserted and that this app has all-files access."
+  [ -d "$TARGET" ] && [ -w "$TARGET" ] || fail "Cannot write to $TARGET. Check selected-folder permission; SD card may be mounted but inaccessible."
+  PROBE="$TARGET/.lxdesk-write-test-$$"
+  (umask 077; : > "$PROBE") 2>/dev/null || fail "Selected storage is mounted but refuses file writes: $TARGET"
+  rm -f "$PROBE"
 fi
 
 for d in "${DIRS[@]}"; do
@@ -50,7 +53,8 @@ for d in "${DIRS[@]}"; do
     mkdir -p "$dst" || fail "Cannot create $dst"
     if [ -L "$src" ]; then
       # Was stored somewhere else before: copy it across, leave the old copy alone.
-      [ -d "$current" ] && { cp -r "$current/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"; }
+      [ -d "$current" ] || fail "Existing $d storage is unavailable: $current. Not replacing the link."
+      cp -r "$current/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
       rm -f "$src"
     elif [ -d "$src" ]; then
       cp -r "$src/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
@@ -68,9 +72,8 @@ for d in "${DIRS[@]}"; do
     tmp="$HOME/.linux-desktop-data-$d.$$"
     rm -rf "$tmp"
     mkdir -p "$tmp" || fail "Could not prepare internal storage for $d"
-    if [ -d "$current" ]; then
-      cp -r "$current/." "$tmp/" || { rm -rf "$tmp"; fail "Could not copy $d back to internal storage"; }
-    fi
+    [ -d "$current" ] || { rm -rf "$tmp"; fail "Previous $d storage is unavailable: $current. Files were not changed."; }
+    cp -r "$current/." "$tmp/" || { rm -rf "$tmp"; fail "Could not copy $d back to internal storage"; }
     rm -f "$src"
     mv "$tmp" "$src" || fail "Could not restore $d to internal storage"
   fi

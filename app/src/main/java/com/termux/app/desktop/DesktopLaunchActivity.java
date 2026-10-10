@@ -340,7 +340,7 @@ public class DesktopLaunchActivity extends Activity {
             if (volumes.isEmpty()) {
                 Toast.makeText(this, "No SD card found. Use \"Choose folder\" instead.", Toast.LENGTH_LONG).show();
             } else {
-                chooseDataDir(volumes.get(0).path + "/LinuxDesktop");
+                chooseDataDir(volumes.get(0).path);
             }
         });
         Button pick = button("Choose folder...", false);
@@ -512,7 +512,8 @@ public class DesktopLaunchActivity extends Activity {
     private void chooseDataDir(String path) {
         DesktopLauncher.writeDataDir(path);
         renderStorage();
-        if (!path.isEmpty() && Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+        if (!path.isEmpty() && Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()
+            && !DesktopLauncher.isAppOwnedStorage(this, path)) {
             new AlertDialog.Builder(this)
                 .setTitle("All-files access needed")
                 .setMessage("To store files on the SD card or in another folder, this app needs \"All files access\". Turn it on on the next screen.")
@@ -641,19 +642,15 @@ public class DesktopLaunchActivity extends Activity {
     }
 
     private void afterSetup() {
-        if (DesktopLauncher.dataDirUnavailable()) {
-            // The chosen folder (for example an SD card) cannot be reached right now.
+        String storageProblem = DesktopLauncher.dataDirProblem(this);
+        if (storageProblem != null) {
             new AlertDialog.Builder(this)
-                .setTitle("Storage folder not available")
-                .setMessage("Your files are set to be stored in " + DesktopLauncher.readDataDir()
-                    + ", but it cannot be reached. Insert the SD card, or use internal storage for now.")
-                .setPositiveButton("Use internal storage", (d, w) -> {
-                    DesktopLauncher.writeDataDir("");
-                    DesktopLauncher.applyDataDir(this);
-                    continueAfterSetup();
-                })
-                .setNegativeButton("Start anyway", (d, w) -> continueAfterSetup())
-                .setOnCancelListener(d -> continueAfterSetup())
+                .setTitle("Selected storage needs attention")
+                .setMessage(storageProblem + "\n\nLXDesk's Linux system remains on internal storage. "
+                    + "Your original files and SD-card selection will be preserved.")
+                .setPositiveButton("Start desktop without moving files", (d, w) -> continueAfterSetup())
+                .setNeutralButton("Choose storage folder", (d, w) -> showStorageSettings())
+                .setNegativeButton("Retry access", (d, w) -> afterSetup())
                 .show();
             return;
         }

@@ -165,10 +165,60 @@ public class DesktopLauncher {
         return !readDataDir().equals(applied); // no applied file means internal storage, the default
     }
 
-    /** True when a data folder is chosen but cannot be reached (for example the SD card was removed). */
-    public static boolean dataDirUnavailable() {
-        String dir = readDataDir();
-        return !dir.isEmpty() && !new File(dir).isDirectory();
+    /**
+     * A mounted card is not necessarily writable, and an unused destination
+     * folder may not exist yet. Probe access rather than treating a missing
+     * directory as a missing SD card.
+     *
+     * @return null when writable, otherwise a useful user-facing explanation.
+     */
+    public static String dataDirProblem(Context context) {
+        String path = readDataDir();
+        if (path.isEmpty()) return null;
+        File folder = new File(path);
+        try {
+            String volumeState = android.os.Environment.getExternalStorageState(folder);
+            if (android.os.Environment.MEDIA_MOUNTED_READ_ONLY.equals(volumeState))
+                return "Storage is mounted read-only: " + path;
+            if (!android.os.Environment.MEDIA_MOUNTED.equals(volumeState)
+                    && !android.os.Environment.MEDIA_UNKNOWN.equals(volumeState))
+                return "Selected storage is not mounted (" + volumeState + "): " + path;
+        } catch (IllegalArgumentException ignored) {
+            // Nonstandard volume: let a real filesystem write test decide.
+        }
+        if (!folder.isDirectory() && !folder.mkdirs() && !folder.isDirectory()) {
+            return storageAccessHint(context, path, "Cannot create the selected folder.");
+        }
+        if (!folder.isDirectory()) return "Selected storage is not a directory: " + path;
+        try {
+            File probe = File.createTempFile(".lxdesk-test-", ".tmp", folder);
+            if (!probe.delete()) probe.deleteOnExit();
+            return null;
+        } catch (IOException | SecurityException ex) {
+            return storageAccessHint(context, path, "Cannot write to the selected folder: " + ex.getMessage());
+        }
+    }
+
+    private static String storageAccessHint(Context context, String path, String reason) {
+        if (Build.VERSION.SDK_INT >= 30
+                && !android.os.Environment.isExternalStorageManager()
+                && !isAppOwnedStorage(context, path))
+            return reason + " Android may require All-files access for public folders. "
+                + "You can also choose LXDesk's SD app folder, which needs no extra storage permission.";
+        return reason + " Check that the card is writable and has free space.";
+    }
+
+    /** App-specific Android storage avoids restricted raw SD-card root access. */
+    public static boolean isAppOwnedStorage(Context context, String path) {
+        if (path == null || path.isEmpty()) return false;
+        File[] roots = context.getExternalFilesDirs(null);
+        if (roots == null) return false;
+        for (File root : roots) {
+            if (root == null) continue;
+            String base = root.getAbsolutePath();
+            if (path.equals(base) || path.startsWith(base + File.separator)) return true;
+        }
+        return false;
     }
 
     /** "done|message" or "failed|message" from the last run of linux-desktop-data, or "". */
@@ -186,22 +236,27 @@ public class DesktopLauncher {
         return isBootstrapInstalled() && writeScripts(context) && runInBackground(context, "linux-desktop-data");
     }
 
+    /**
+     * Select Android-provided app directories on removable volumes.
+     * Raw /storage/<UUID>/LinuxDesktop cannot be assumed writable under
+     * Android scoped-storage rules even while the card is mounted.
+     */
     public static java.util.List<Volume> removableVolumes(Context context) {
         java.util.List<Volume> out = new java.util.ArrayList<>();
-        android.os.storage.StorageManager manager = (android.os.storage.StorageManager) context.getSystemService(Context.STORAGE_SERVICE);
-        if (manager == null) return out;
-        for (android.os.storage.StorageVolume volume : manager.getStorageVolumes()) {
-            if (!volume.isRemovable() || !android.os.Environment.MEDIA_MOUNTED.equals(volume.getState())) continue;
-            String path = null;
-            if (Build.VERSION.SDK_INT >= 30) {
-                File directory = volume.getDirectory();
-                if (directory != null) path = directory.getAbsolutePath();
-            } else {
-                try {
-                    path = (String) android.os.storage.StorageVolume.class.getMethod("getPath").invoke(volume);
-                } catch (Exception ignored) {}
-            }
-            if (path != null) out.add(new Volume(volume.getDescription(context), path));
+        File[] roots = context.getExternalFilesDirs(null);
+        if (roots == null) return out;
+        android.os.storage.StorageManager manager =
+            (android.os.storage.StorageManager) context.getSystemService(Context.STORAGE_SERVICE);
+        for (File root : roots) {
+            if (root == null) continue;
+            if (!android.os.Environment.MEDIA_MOUNTED.equals(
+                    android.os.Environment.getExternalStorageState(root))) continue;
+            if (!android.os.Environment.isExternalStorageRemovable(root)) continue;
+            android.os.storage.StorageVolume volume =
+                manager == null ? null : manager.getStorageVolume(root);
+            String label = volume == null ? "Removable storage" : volume.getDescription(context);
+            out.add(new Volume(label + " (LXDesk app folder)",
+                new File(root, "LXDesk").getAbsolutePath()));
         }
         return out;
     }
@@ -243,6 +298,16 @@ public class DesktopLauncher {
         out.append("data folder requested: ").append(dataDir.isEmpty() ? "internal" : dataDir)
             .append(", applied: ").append(appliedDataDir.isEmpty() ? "internal" : appliedDataDir)
             .append(", state: ").append(readDataState()).append('\n');
+        out.append("all-files access: ")
+            .append(Build.VERSION.SDK_INT < 30 || android.os.Environment.isExternalStorageManager())
+            .append('\n');
+        String dataProblem = dataDirProblem(context);
+        out.append("selected storage check: ")
+            .append(dataProblem == null ? "writable" : dataProblem).append('\n');
+        for (Volume card : removableVolumes(context)) {
+            out.append("removable storage: ").append(card.label).append(" = ")
+                .append(card.path).append('\n');
+        }
         out.append("extras: ").append(readFirstLine(new File(STATE_DIR, "extras-state"))).append(" / ")
             .append(readFirstLine(new File(STATE_DIR, "extras-progress"))).append('\n');
         appendTail(out, "extras-skipped.log", new File(STATE_DIR, "extras-skipped.log"), 20);
