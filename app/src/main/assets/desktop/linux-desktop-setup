@@ -32,7 +32,7 @@ fi
 
 if [ -f "$SECOND_STAGE" ] && [ ! -L "$SECOND_STAGE.lock" ]; then
   echo "Running the Termux bootstrap second stage"
-  chmod +x "$SECOND_STAGE"
+  /system/bin/chmod +x "$SECOND_STAGE"
   if ! "$SECOND_STAGE"; then
     echo "Second stage failed" >&2
     touch "$SECOND_STAGE_FAILED"
@@ -159,7 +159,9 @@ fi
 
 mkdir -p "$HOME/Desktop"
 printf '[Desktop Entry]\nName=Terminal\nExec=xfce4-terminal\nIcon=utilities-terminal\nType=Application\nCategories=System;TerminalEmulator;\n' > "$HOME/Desktop/Terminal.desktop"
-chmod +x "$HOME"/Desktop/*.desktop 2>/dev/null
+for shortcut in "$HOME"/Desktop/*.desktop; do
+  [ -f "$shortcut" ] && /system/bin/chmod 755 "$shortcut"
+done
 
 # One authoritative validation path; reruns safely on partial installs.
 progress 98 "Verifying the desktop and its dependencies"

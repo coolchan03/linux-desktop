@@ -64,7 +64,9 @@ command -v firefox  >/dev/null && mk Firefox "firefox" firefox "Network;WebBrows
 command -v code-oss >/dev/null && mk "VS Code" "code-oss --no-sandbox" code-oss "Development"
 command -v hangover-wine >/dev/null && mk "Wine Config" "hangover-wine winecfg" wine "Settings"
 command -v msfconsole >/dev/null && mk "Metasploit" "xfce4-terminal -e msfconsole" utilities-terminal "Security"
-chmod +x "$HOME"/Desktop/*.desktop 2>/dev/null
+for shortcut in "$HOME"/Desktop/*.desktop; do
+  [ -f "$shortcut" ] && /system/bin/chmod 755 "$shortcut"
+done
 
 if [ ${#FAILED[@]} -eq 0 ] && [ ${#SKIPPED[@]} -eq 0 ]; then
   touch "$MARK/extras-done-$PRESET"; echo done > "$MARK/extras-state"; progress 100 "All selected apps installed"
