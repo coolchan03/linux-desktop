@@ -21,6 +21,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.StatFs;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -60,6 +61,7 @@ public class DesktopLaunchActivity extends Activity {
     private static final int REQUEST_RUNTIME_PERMISSIONS = 4100;
     private static final int REQUEST_ALL_FILES_ACCESS = 4101;
     private static final int REQUEST_PICK_FOLDER = 4102;
+    private static final int REQUEST_BATTERY_OPTIMIZATIONS = 4103;
     private static final String PREFS = "desktop_launcher";
     private static final String KEY_PERMISSIONS_ASKED = "permissions_asked";
     private static final String KEY_KEEP_ALIVE_ASKED = "keep_alive_asked";
@@ -95,6 +97,9 @@ public class DesktopLaunchActivity extends Activity {
     private boolean mResumed;
     private boolean mSetupFinishedInBackground;
     private boolean mDisplayReady;
+    private boolean mDataMoveInProgress;
+    private String mDataMoveErrorInBackground;
+    private long mSetupStartedAt;
     private Step mStep = Step.PREPARE;
     private Runnable mRetryAction;
     private LinearLayout mSteps;
@@ -160,6 +165,11 @@ public class DesktopLaunchActivity extends Activity {
             mSetupFinishedInBackground = false;
             afterSetup();
         }
+        if (mDataMoveErrorInBackground != null) {
+            String error = mDataMoveErrorInBackground;
+            mDataMoveErrorInBackground = null;
+            showDataMoveError(error);
+        }
         if (mDisplayReady) openDisplay();
     }
 
@@ -206,6 +216,8 @@ public class DesktopLaunchActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_ALL_FILES_ACCESS) {
             if (mSettingsMode) renderStorage(); else begin();
+        } else if (requestCode == REQUEST_BATTERY_OPTIMIZATIONS) {
+            showChildProcessInfo();
         } else if (requestCode == REQUEST_PICK_FOLDER && resultCode == RESULT_OK && data != null && data.getData() != null) {
             String path = DesktopLauncher.pathFromTreeUri(data.getData());
             if (path == null) {
@@ -491,7 +503,7 @@ public class DesktopLaunchActivity extends Activity {
         mHeadline.setTextColor(COLOR_TEXT);
         mHeadline.setText("What should be installed?");
         mDetail.setText("The desktop installs first (about 5-10 minutes). Apps install in the background so you can start using it right away.\n\n"
-            + "Free storage: " + String.format(Locale.US, "%.1f", freeStorageGb()) + " GB. Roughly needed: Minimal 3 GB, Standard 5 GB, Full 9 GB.\n"
+            + "Free storage: " + String.format(Locale.US, "%.1f", freeStorageGb()) + " GB. Needed: Minimal " + (int) DesktopLauncher.Preset.MINIMAL.requiredStorageGb + " GB, Standard " + (int) DesktopLauncher.Preset.STANDARD.requiredStorageGb + " GB, Full " + (int) DesktopLauncher.Preset.FULL.requiredStorageGb + " GB.\n"
             + (hasInternet() ? "Wi-Fi is recommended; the download is large." : "No internet connection detected. Connect before installing."));
         mBar.setVisibility(View.GONE);
         mPresets.setVisibility(View.VISIBLE);
@@ -550,13 +562,24 @@ public class DesktopLaunchActivity extends Activity {
                 Toast.makeText(this, "Finish the desktop setup first.", Toast.LENGTH_LONG).show();
             } else if (!DesktopLauncher.dataDirNeedsApplying()) {
                 finish();
-            } else if (DesktopLauncher.applyDataDir(this)) {
+            } else {
+                // A live XFCE session may write to these folders during the copy.
+                DesktopLauncher.stopDesktop(this);
                 mInstall.setVisibility(View.GONE);
-                mHeadline.setText("Moving your files");
-                mDetail.setText("Please wait. Large folders can take a while; you can leave this screen and it continues.");
+                mHeadline.setText("Stopping desktop and moving files");
+                mDetail.setText("Large folders can take a while. Your originals are kept.");
                 mBar.setVisibility(View.VISIBLE);
                 mBar.setIndeterminate(true);
-                pollDataMove();
+                mHandler.postDelayed(() -> {
+                    if (DesktopLauncher.applyDataDir(this)) {
+                        pollDataMove();
+                    } else {
+                        mBar.setVisibility(View.GONE);
+                        mHeadline.setText("Could not start file move");
+                        mInstall.setText("Try again");
+                        mInstall.setVisibility(View.VISIBLE);
+                    }
+                }, 900);
             }
         });
     }
@@ -604,14 +627,15 @@ public class DesktopLaunchActivity extends Activity {
                 "Connect to Wi-Fi or mobile data, then try again.", this::runSetup);
             return;
         }
-        if (!alreadyRunning && freeStorageGb() < 3.0) {
+        if (!alreadyRunning && freeStorageGb() < DesktopLauncher.readPreset().requiredStorageGb) {
             showError(Step.INSTALL, "Not enough free storage",
-                String.format(Locale.US, "%.1f", freeStorageGb()) + " GB free. Free up at least 3 GB, then try again.", this::runSetup);
+                String.format(Locale.US, "%.1f", freeStorageGb()) + " GB free. Free up at least " + (int) DesktopLauncher.readPreset().requiredStorageGb + " GB, then try again.", this::runSetup);
             return;
         }
         if (!alreadyRunning) {
             setProgress(Step.INSTALL, "Installing the desktop", "This takes about 5-10 minutes and needs internet.", 0);
             DesktopLauncher.resetProgress();
+            mSetupStartedAt = SystemClock.elapsedRealtime();
             if (!DesktopLauncher.startSetup(this)) {
                 showError(Step.INSTALL, "Could not start the installer", "Try again.", this::runSetup);
                 return;
@@ -638,6 +662,12 @@ public class DesktopLaunchActivity extends Activity {
                 this::runSetup);
             return;
         }
+        if (p.state.isEmpty() && p.message.isEmpty() && mSetupStartedAt > 0
+                && SystemClock.elapsedRealtime() - mSetupStartedAt > 60000) {
+            showError(Step.INSTALL, "The installer did not start",
+                "Tap Copy debug info for more details.", this::runSetup);
+            return;
+        }
         if (!p.message.isEmpty())
             setProgress(Step.INSTALL, "Installing the desktop", p.message + "\nYou can leave the app; installation continues.", p.percent);
         mHandler.postDelayed(this::pollSetup, 700);
@@ -656,8 +686,48 @@ public class DesktopLaunchActivity extends Activity {
                 .show();
             return;
         }
-        if (DesktopLauncher.dataDirNeedsApplying()) DesktopLauncher.applyDataDir(this);
-        continueAfterSetup();
+        if (mDataMoveInProgress) return;
+        if (!DesktopLauncher.dataDirNeedsApplying()) {
+            continueAfterSetup();
+            return;
+        }
+        setProgress(Step.START, "Moving your files", "Preparing the selected storage folder before starting XFCE.", -1);
+        mDataMoveInProgress = true;
+        if (!DesktopLauncher.applyDataDir(this)) {
+            mDataMoveInProgress = false;
+            showDataMoveError("The file migration could not be started.");
+            return;
+        }
+        mHandler.postDelayed(this::pollDataMoveBeforeDesktop, 700);
+    }
+
+    private void pollDataMoveBeforeDesktop() {
+        if (isFinishing() || isDestroyed()) return;
+        String state = DesktopLauncher.readDataState();
+        if (state.startsWith("done|")) {
+            mDataMoveInProgress = false;
+            if (mResumed) continueAfterSetup();
+            else mSetupFinishedInBackground = true;
+        } else if (state.startsWith("failed|")) {
+            mDataMoveInProgress = false;
+            if (mResumed) showDataMoveError(state.substring(7));
+            else mDataMoveErrorInBackground = state.substring(7);
+        } else {
+            if (state.startsWith("running|"))
+                setProgress(Step.START, "Moving your files", state.substring(8), -1);
+            mHandler.postDelayed(this::pollDataMoveBeforeDesktop, 700);
+        }
+    }
+
+    private void showDataMoveError(String message) {
+        if (isFinishing() || isDestroyed()) return;
+        new AlertDialog.Builder(this)
+            .setTitle("Could not move your files")
+            .setMessage(message + "\n\nThe existing files have been preserved.")
+            .setPositiveButton("Start desktop anyway", (dialog, which) -> continueAfterSetup())
+            .setNegativeButton("Try again", (dialog, which) -> afterSetup())
+            .setNeutralButton("Choose storage folder", (dialog, which) -> showStorageSettings())
+            .show();
     }
 
     private void continueAfterSetup() {
@@ -670,26 +740,46 @@ public class DesktopLaunchActivity extends Activity {
         }
     }
 
-    /** Android kills background processes aggressively; a desktop session is a lot of them. */
+    /** Wait for the system battery dialog to close before showing additional guidance. */
     private void askKeepAlive() {
         if (Build.VERSION.SDK_INT >= 23 && !PermissionUtils.checkIfBatteryOptimizationsDisabled(this)) {
-            PermissionUtils.requestDisableBatteryOptimizations(this);
+            try {
+                startActivityForResult(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName())), REQUEST_BATTERY_OPTIMIZATIONS);
+                return;
+            } catch (Exception e) {
+                // Some OEMs hide this system settings screen.
+                Toast.makeText(this, "Battery optimization settings are unavailable.", Toast.LENGTH_LONG).show();
+            }
         }
+        showChildProcessInfo();
+    }
+
+    private void showChildProcessInfo() {
         if (Build.VERSION.SDK_INT < 31) {
             startDesktop();
             return;
         }
+        final String adbCommands = "adb shell settings put global settings_enable_monitor_phantom_procs false\n"
+            + "adb shell device_config put activity_manager max_phantom_processes 2147483647";
+        String guidance = Build.VERSION.SDK_INT >= 34
+            ? "Android can restrict background child processes. If LXDesk closes unexpectedly, check Developer options for Disable child process restrictions."
+            : "Android 12–13 may terminate many background processes. With Wireless debugging or adb, run the supplied commands from your computer. There may be no Developer-options toggle on these Android versions.";
         new AlertDialog.Builder(this)
             .setTitle("Keep the desktop running")
-            .setMessage("Android 12 and newer can stop background programs, which ends a desktop session. "
-                + "If the desktop closes by itself, open Developer options and turn on \"Disable child process restrictions\" "
-                + "(Android 14+), or \"Disable monitoring of phantom processes\" on Android 12-13.")
+            .setMessage(guidance)
             .setPositiveButton("Open Developer options", (d, w) -> {
                 try {
                     startActivity(new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
                 } catch (Exception e) {
-                    Toast.makeText(this, "Turn on Developer options first (tap Build number 7 times in About phone).", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Enable Developer options in About phone first.", Toast.LENGTH_LONG).show();
                 }
+                startDesktop();
+            })
+            .setNeutralButton("Copy adb commands", (d, w) -> {
+                ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                if (clipboard != null)
+                    clipboard.setPrimaryClip(ClipData.newPlainText("LXDesk Android 12-13 commands", adbCommands));
                 startDesktop();
             })
             .setNegativeButton("Skip", (d, w) -> startDesktop())

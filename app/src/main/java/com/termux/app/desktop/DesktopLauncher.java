@@ -97,16 +97,28 @@ public class DesktopLauncher {
 
     /** What to install in the background once the desktop is running. */
     public enum Preset {
-        MINIMAL("minimal", "Minimal", "Desktop only. Add apps later with pkg."),
-        STANDARD("standard", "Standard", "Desktop + Firefox, VS Code, git."),
-        FULL("full", "Full", "Standard + available security/network tools and Windows apps (Wine on arm64).");
+        MINIMAL("minimal", "Minimal", "Desktop only. Add apps later with pkg.", 3.0),
+        STANDARD("standard", "Standard", "Desktop + Firefox, VS Code, git.", 5.0),
+        FULL("full", "Full", "Standard + available security/network tools.", 9.0);
 
         public final String id, title, description;
-        Preset(String id, String title, String description) { this.id = id; this.title = title; this.description = description; }
+        public final double requiredStorageGb;
+        Preset(String id, String title, String description, double requiredStorageGb) {
+            this.id = id;
+            this.title = title;
+            this.description = description;
+            this.requiredStorageGb = requiredStorageGb;
+        }
     }
 
     public static void writePreset(Preset preset) {
         writeStateFile(PRESET_FILE, preset.id + "\n");
+    }
+
+    public static Preset readPreset() {
+        String id = readFirstLine(PRESET_FILE).trim();
+        for (Preset preset : Preset.values()) if (preset.id.equals(id)) return preset;
+        return Preset.STANDARD;
     }
 
     private static void writeStateFile(File file, String text) {

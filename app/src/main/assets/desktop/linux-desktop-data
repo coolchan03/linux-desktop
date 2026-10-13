@@ -12,6 +12,10 @@ mkdir -p "$MARK"
 TARGET="$(cat "$MARK/datadir" 2>/dev/null)"
 DIRS=(Documents Downloads Music Pictures Projects Videos)
 status() { echo "$1|$2" > "$MARK/data-state"; }
+if pgrep -x xfce4-session >/dev/null 2>&1; then
+  status failed "Stop the desktop before moving files"
+  exit 1
+fi
 PID_FILE="$MARK/data.pid"
 
 # Do not let two storage migrations race with each other.
