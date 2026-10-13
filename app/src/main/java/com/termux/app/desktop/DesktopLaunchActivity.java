@@ -95,7 +95,6 @@ public class DesktopLaunchActivity extends Activity {
     private Button mRetry;
     private Button mInstall;
     private Button mPurge;
-    private Button mPurge;
     private RadioGroup mPresets;
     private boolean mBegun;
     private boolean mFinished;
