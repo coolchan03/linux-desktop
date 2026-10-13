@@ -11,6 +11,10 @@ PRESET="$(cat "$MARK/preset" 2>/dev/null || echo standard)"
 progress() { echo "$1|$2" > "$MARK/extras-progress"; }
 
 [ -f "$MARK/extras-done-$PRESET" ] && exit 0
+# Missing optional packages are rechecked once per day, not on every desktop launch.
+if [ -f "$MARK/extras-checked-$PRESET" ] && find "$MARK/extras-checked-$PRESET" -mmin -1440 2>/dev/null | grep -q .; then
+  exit 0
+fi
 PIDFILE="$MARK/extras.pid"
 if [ -f "$PIDFILE" ] && pid="$(cat "$PIDFILE" 2>/dev/null)" && kill -0 "$pid" 2>/dev/null \
    && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q 'linux-desktop-extras'; then
@@ -32,6 +36,9 @@ TOOLS=(nmap netcat-openbsd whois dnsutils tracepath hydra john sqlmap python)
 # repositories actually advertise; missing optional tools must never poison the whole extras pass.
 LIST=(); SKIPPED=()
 queue_if_available() {
+  if dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; then
+    return 0
+  fi
   if apt-cache show "$1" >/dev/null 2>&1; then LIST+=("$1"); else SKIPPED+=("$1"); fi
 }
 for p in "${APPS[@]}"; do queue_if_available "$p"; done
@@ -71,7 +78,7 @@ done
 if [ ${#FAILED[@]} -eq 0 ] && [ ${#SKIPPED[@]} -eq 0 ]; then
   touch "$MARK/extras-done-$PRESET"; echo done > "$MARK/extras-state"; progress 100 "All selected apps installed"
 elif [ ${#FAILED[@]} -eq 0 ]; then
-  touch "$MARK/extras-done-$PRESET"
+  touch "$MARK/extras-checked-$PRESET"
   echo "partial: unavailable ${SKIPPED[*]}" > "$MARK/extras-state"
   progress 100 "Installed available apps; unavailable: ${SKIPPED[*]}"
 else
