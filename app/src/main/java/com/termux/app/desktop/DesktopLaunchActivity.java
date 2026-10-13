@@ -812,7 +812,7 @@ public class DesktopLaunchActivity extends Activity {
         } else if (status.startsWith("failed|")) {
             mFinished = false;
             showError(Step.START, "Could not start X11", status.substring(7), this::startDesktop);
-        } else if (checks >= 50) {
+        } else if (checks >= 120) {
             mFinished = false;
             showError(Step.START, "X11 startup timed out", "Check the X11 and desktop logs using Copy debug info.", this::startDesktop);
         } else {

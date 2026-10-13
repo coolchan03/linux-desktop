@@ -15,16 +15,26 @@ fi
 # Detect the actual XFCE and X11 processes before stopping anything: the old PID
 # was the launcher shell, not startxfce4, so relaunching killed live sessions.
 X11_SOCKET="${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
-if pgrep -x xfce4-session >/dev/null 2>&1 && pgrep -f 'termux-x11' >/dev/null 2>&1 && [ -S "$X11_SOCKET" ]; then
+if [ "${LXDESK_GPU_RETRY:-0}" != 1 ] && pgrep -x xfce4-session >/dev/null 2>&1 && pgrep -f 'termux-x11' >/dev/null 2>&1 && [ -S "$X11_SOCKET" ]; then
   echo "ready|Desktop already running" > "$STATUS"
   exit 0
 fi
 PIDFILE="$HOME/.config/linux-desktop/desktop.pid"
 echo $$ > "$PIDFILE"
 
-source "$HOME/.config/hacklab-gpu.sh" 2>/dev/null
+# Use software rendering after a GPU-profile startup failure.
+SOFTWARE_GL="$HOME/.config/linux-desktop/software-gl"
+GPU_PROFILE="$HOME/.config/hacklab-gpu.sh"
+GPU_PROFILE_USED=0
+if [ -f "$SOFTWARE_GL" ]; then
+  unset GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE TU_DEBUG VK_ICD_FILENAMES
+  export LIBGL_ALWAYS_SOFTWARE=1
+elif [ -s "$GPU_PROFILE" ]; then
+  source "$GPU_PROFILE" 2>/dev/null
+  GPU_PROFILE_USED=1
+fi
 
-pkill -x termux-x11 2>/dev/null || true
+pkill -x termux-x11 2>/dev/null || pkill -f '^termux-x11 ' 2>/dev/null || true
 for proc in xfce4-session xfwm4 xfce4-panel xfdesktop; do
   pkill -x "$proc" 2>/dev/null || true
 done
@@ -91,10 +101,30 @@ echo "Launching embedded display from LXDesk activity"
 
 dbus-launch --exit-with-session startxfce4 &
 XFCE_PID=$!
-sleep 3
-if ! kill -0 "$XFCE_PID" 2>/dev/null; then
-  echo "failed|XFCE terminated during startup. See desktop.log" > "$STATUS"
-  wait "$XFCE_PID" 2>/dev/null || true
+xfce_ready=0
+tries=0
+# A live shell alone is not proof that the XFCE panel/window manager started.
+while [ "$tries" -lt 40 ]; do
+  if kill -0 "$XFCE_PID" 2>/dev/null && pgrep -x xfwm4 >/dev/null 2>&1 && pgrep -x xfce4-panel >/dev/null 2>&1; then
+    xfce_ready=1
+    break
+  fi
+  kill -0 "$XFCE_PID" 2>/dev/null || break
+  sleep 0.5
+  tries=$((tries + 1))
+done
+if [ "$xfce_ready" -ne 1 ]; then
+  if [ "$GPU_PROFILE_USED" -eq 1 ] && [ ! -f "$SOFTWARE_GL" ]; then
+    echo "GPU XFCE launch failed; retrying once with software rendering" >> "$HOME/.config/linux-desktop/desktop.log"
+    touch "$SOFTWARE_GL"
+    kill "$XFCE_PID" 2>/dev/null || true
+    unset GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE TU_DEBUG VK_ICD_FILENAMES
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export LXDESK_GPU_RETRY=1
+    exec "$0"
+  fi
+  echo "failed|XFCE did not start (window manager or panel missing). See desktop.log" > "$STATUS"
+  kill "$XFCE_PID" 2>/dev/null || true
   exit 1
 fi
 echo "ready|X11 and XFCE are running" > "$STATUS"
