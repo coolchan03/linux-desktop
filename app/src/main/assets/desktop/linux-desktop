@@ -1,6 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Starts the Linux desktop and shows it in this app's built-in display.
 mkdir -p "$HOME/.config/linux-desktop"
+. "$PREFIX/bin/lxdesk-common.sh"
+lxdesk_rotate_log "$HOME/.config/linux-desktop/desktop.log"
 MARK="$HOME/.config/linux-desktop/installed-v1"
 STATUS="$HOME/.config/linux-desktop/start-state"
 echo "starting|Preparing X11" > "$STATUS"

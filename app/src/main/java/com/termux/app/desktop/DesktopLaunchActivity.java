@@ -42,6 +42,8 @@ import com.termux.shared.android.PermissionUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * The app's only launcher entry ("LXDesk"). Asks once for optional runtime permissions the desktop
@@ -85,6 +87,7 @@ public class DesktopLaunchActivity extends Activity {
     }
 
     private final Handler mHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService mIo = Executors.newSingleThreadExecutor();
     private final TextView[] mStepViews = new TextView[Step.values().length];
     private TextView mHeadline;
     private TextView mDetail;
@@ -98,6 +101,7 @@ public class DesktopLaunchActivity extends Activity {
     private boolean mSetupFinishedInBackground;
     private boolean mDisplayReady;
     private boolean mDataMoveInProgress;
+    private boolean mStorageCheckPending;
     private String mDataMoveErrorInBackground;
     private long mSetupStartedAt;
     private Step mStep = Step.PREPARE;
@@ -130,18 +134,18 @@ public class DesktopLaunchActivity extends Activity {
             begin();
             return;
         }
-        prefs.edit().putBoolean(KEY_PERMISSIONS_ASKED, true).apply();
-
         List<String> missing = new ArrayList<>();
         for (String permission : runtimePermissions())
             if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED)
                 missing.add(permission);
 
         setProgress(Step.PREPARE, "Getting ready", "Android will ask for a few permissions. You can deny any of them.", -1);
-        if (!missing.isEmpty())
+        if (!missing.isEmpty()) {
             requestPermissions(missing.toArray(new String[0]), REQUEST_RUNTIME_PERMISSIONS);
-        else
+        } else {
+            prefs.edit().putBoolean(KEY_PERMISSIONS_ASKED, true).apply();
             begin();
+        }
     }
 
     @Override
@@ -207,8 +211,12 @@ public class DesktopLaunchActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         // Denied permissions are not fatal; the desktop works without them.
-        // All-files access is requested later only if the user chooses external storage.
-        begin();
+        // Only mark the first request complete when Android has returned its result.
+        if (requestCode == REQUEST_RUNTIME_PERMISSIONS) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(KEY_PERMISSIONS_ASKED, true).apply();
+            begin();
+        }
     }
 
     @Override
@@ -396,9 +404,20 @@ public class DesktopLaunchActivity extends Activity {
 
         Button debug = button("Copy debug info", false);
         debug.setOnClickListener(v -> {
-            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(ClipData.newPlainText("LXDesk debug info", DesktopLauncher.collectDebugInfo(this)));
-            Toast.makeText(this, "Copied. Paste it into your message.", Toast.LENGTH_LONG).show();
+            debug.setEnabled(false);
+            mIo.execute(() -> {
+                String diagnostics = DesktopLauncher.collectDebugInfo(this);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    debug.setEnabled(true);
+                    ClipboardManager clipboard =
+                        (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (clipboard != null) {
+                        clipboard.setPrimaryClip(ClipData.newPlainText("LXDesk debug info", diagnostics));
+                        Toast.makeText(this, "Copied. Paste it into your message.", Toast.LENGTH_LONG).show();
+                    }
+                });
+            });
         });
         LinearLayout.LayoutParams debugParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         debugParams.topMargin = dp(24);
@@ -674,7 +693,24 @@ public class DesktopLaunchActivity extends Activity {
     }
 
     private void afterSetup() {
-        String storageProblem = DesktopLauncher.dataDirProblem(this);
+        if (mStorageCheckPending || mDataMoveInProgress) return;
+        mStorageCheckPending = true;
+        setProgress(Step.START, "Checking selected storage", "Checking storage access before starting XFCE.", -1);
+        mIo.execute(() -> {
+            String storageProblem = DesktopLauncher.dataDirProblem(this);
+            runOnUiThread(() -> {
+                mStorageCheckPending = false;
+                if (isFinishing() || isDestroyed()) return;
+                if (!mResumed) {
+                    mSetupFinishedInBackground = true;
+                    return;
+                }
+                afterStorageChecked(storageProblem);
+            });
+        });
+    }
+
+    private void afterStorageChecked(String storageProblem) {
         if (storageProblem != null) {
             new AlertDialog.Builder(this)
                 .setTitle("Selected storage needs attention")
@@ -830,6 +866,7 @@ public class DesktopLaunchActivity extends Activity {
     @Override
     protected void onDestroy() {
         mHandler.removeCallbacksAndMessages(null);
+        mIo.shutdownNow();
         super.onDestroy();
     }
 }

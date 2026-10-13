@@ -2,8 +2,9 @@
 # Validate a functional XFCE install, not merely a successful package command.
 MARK="$HOME/.config/linux-desktop"
 mkdir -p "$MARK"
-PACKAGES=(procps xorg-xrandr xkeyboard-config xfce4 xfce4-terminal thunar mousepad pulseaudio dbus mesa)
-COMMANDS=(startxfce4 xfce4-session xfce4-panel xfwm4 xfdesktop xfce4-terminal thunar dbus-launch pulseaudio xrandr)
+. "$PREFIX/bin/lxdesk-common.sh"
+PACKAGES=("${CORE_PACKAGES[@]}")
+COMMANDS=("${CORE_COMMANDS[@]}")
 missing=()
 for pkg in "${PACKAGES[@]}"; do
   status="$(dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null)"

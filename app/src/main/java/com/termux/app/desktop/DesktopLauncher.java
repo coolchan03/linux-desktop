@@ -28,7 +28,8 @@ public class DesktopLauncher {
 
     private static final String LOG_TAG = "DesktopLauncher";
     private static final String ASSET_DIR = "desktop/";
-    private static final String[] SCRIPTS = {"termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-stop", "linux-desktop-verify"};
+    private static String sWrittenFromApk;
+    private static final String[] SCRIPTS = {"lxdesk-common.sh", "termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-stop", "linux-desktop-verify"};
 
     private static final File STATE_DIR = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".config/linux-desktop");
     private static final File INSTALLED_MARKER = new File(STATE_DIR, "installed-v1");
@@ -193,6 +194,15 @@ public class DesktopLauncher {
      * @return null when writable, otherwise a useful user-facing explanation.
      */
     public static String dataDirProblem(Context context) {
+        return dataDirProblem(context, true);
+    }
+
+    /** Never creates folders or probe files; safe to use when collecting diagnostics. */
+    public static String dataDirProblemReadOnly(Context context) {
+        return dataDirProblem(context, false);
+    }
+
+    private static String dataDirProblem(Context context, boolean writeProbe) {
         String path = readDataDir();
         if (path.isEmpty()) return null;
         File folder = new File(path);
@@ -205,6 +215,11 @@ public class DesktopLauncher {
                 return "Selected storage is not mounted (" + volumeState + "): " + path;
         } catch (IllegalArgumentException ignored) {
             // Nonstandard volume: let a real filesystem write test decide.
+        }
+        if (!writeProbe) {
+            if (!folder.exists()) return "Folder does not yet exist (read-only check): " + path;
+            if (!folder.isDirectory()) return "Selected storage is not a directory: " + path;
+            return folder.canWrite() ? null : storageAccessHint(context, path, "Folder may not be writable.");
         }
         if (!folder.isDirectory() && !folder.mkdirs() && !folder.isDirectory()) {
             return storageAccessHint(context, path, "Cannot create the selected folder.");
@@ -321,9 +336,11 @@ public class DesktopLauncher {
         out.append("all-files access: ")
             .append(Build.VERSION.SDK_INT < 30 || android.os.Environment.isExternalStorageManager())
             .append('\n');
-        String dataProblem = dataDirProblem(context);
-        out.append("selected storage check: ")
-            .append(dataProblem == null ? "writable" : dataProblem).append('\n');
+        String dataProblem = dataDirProblemReadOnly(context);
+        out.append("selected storage check (read-only): ")
+            .append(dataProblem == null ? "no obvious access problem (not write-tested)" : dataProblem).append('\n');
+        out.append("software GL fallback: ")
+            .append(new File(STATE_DIR, "software-gl").exists()).append('\n');
         for (Volume card : removableVolumes(context)) {
             out.append("removable storage: ").append(card.label).append(" = ")
                 .append(card.path).append('\n');
@@ -338,8 +355,7 @@ public class DesktopLauncher {
         appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
         appendTail(out, "verify.log", new File(STATE_DIR, "verify.log"), 30);
         appendTail(out, "last-pkg.log", new File(STATE_DIR, "last-pkg.log"), 35);
-        appendTail(out, "missing-components.log", new File(STATE_DIR, "missing-components.log"), 30);
-        appendTail(out, "verify.log", new File(STATE_DIR, "verify.log"), 30);
+        appendTail(out, "last-extra.log", new File(STATE_DIR, "last-extra.log"), 35);
         appendTail(out, "repair.log", new File(STATE_DIR, "repair.log"), 30);
         appendTail(out, "update-initial.log", new File(STATE_DIR, "update-initial.log"), 30);
         appendTail(out, "update-final.log", new File(STATE_DIR, "update-final.log"), 30);
@@ -460,8 +476,19 @@ public class DesktopLauncher {
         }
     }
 
-    private static boolean writeScripts(Context context) {
+    private static synchronized boolean writeScripts(Context context) {
         String apkPath = context.getApplicationInfo().sourceDir;
+        // Revalidate installed files if a bootstrap reset removed the bin directory.
+        if (apkPath.equals(sWrittenFromApk)) {
+            boolean stillInstalled = true;
+            for (String name : SCRIPTS) {
+                if (!new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, name).canExecute()) {
+                    stillInstalled = false;
+                    break;
+                }
+            }
+            if (stillInstalled) return true;
+        }
         for (String name : SCRIPTS) {
             try (InputStream in = context.getAssets().open(ASSET_DIR + name)) {
                 String body = PathRelocator.relocate(new String(readAll(in), StandardCharsets.UTF_8))
@@ -469,7 +496,21 @@ public class DesktopLauncher {
                     .replace("@NATIVE_LIB_DIR@", context.getApplicationInfo().nativeLibraryDir)
                     .replace("@PKG@", context.getPackageName());
                 File out = new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, name);
-                // Always rewritten: the APK path embedded in termux-x11 changes on every app update.
+                // Avoid rewriting identical scripts on every action. Replacing changed scripts
+                // uses a new inode, safe when an older bash invocation is still running.
+                if (out.isFile()) {
+                    boolean identical = false;
+                    try (InputStream current = new java.io.FileInputStream(out)) {
+                        identical = java.util.Arrays.equals(readAll(current), body.getBytes(StandardCharsets.UTF_8));
+                    } catch (IOException ignored) {
+                        // Fall back to replacing an unreadable or damaged installed script.
+                    }
+                    if (identical) {
+                        if (!out.canExecute() && !out.setExecutable(true, false))
+                            throw new IOException("Cannot chmod " + out);
+                        continue;
+                    }
+                }
                 if (out.exists() && !out.delete()) throw new IOException("Cannot replace " + out);
                 com.termux.shared.errors.Error error = FileUtils.writeTextToFile(name, out.getAbsolutePath(),
                     StandardCharsets.UTF_8, body, false);
@@ -480,6 +521,7 @@ public class DesktopLauncher {
                 return false;
             }
         }
+        sWrittenFromApk = apkPath;
         return true;
     }
 

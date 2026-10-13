@@ -3,3 +3,5 @@
 *.gradle    text eol=lf
 *.mk        text eol=lf
 *.sh        text eol=lf
+# Bundled Termux shell entrypoints have no .sh suffix; Android needs LF endings.
+app/src/main/assets/desktop/* text eol=lf

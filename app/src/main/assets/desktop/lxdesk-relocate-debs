@@ -14,6 +14,10 @@ NEW_PKG="@NEW_PKG@"
 export LC_ALL=C
 LOG="$HOME/.config/linux-desktop/relocate.log"
 mkdir -p "$(dirname "$LOG")" 2>/dev/null
+# This hook runs during bootstrap before lxdesk-common.sh is installed.
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null)" -gt 1048576 ]; then
+    mv -f "$LOG" "$LOG.old"
+fi
 log() { echo "$(date '+%H:%M:%S') $*" >> "$LOG" 2>/dev/null; }
 OLD_RE="/data/\(data\|user/0\)/com\.termux"
 NEW_SUB="/data/\1/$NEW_PKG"

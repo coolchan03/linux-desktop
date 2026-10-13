@@ -5,6 +5,8 @@
 
 MARK="$HOME/.config/linux-desktop"
 mkdir -p "$MARK"
+. "$PREFIX/bin/lxdesk-common.sh"
+lxdesk_rotate_log "$MARK/setup.log"
 # Everything this script prints is kept for troubleshooting ("Copy debug info" includes the end of it).
 [ -t 1 ] || exec >>"$MARK/setup.log" 2>&1
 echo "=== setup started $(date) ==="
@@ -110,7 +112,7 @@ install_pkg() {
 
 # Core packages: keep first boot conservative. Current Termux ships Zink inside the regular mesa package.
 # GPU-specific Vulkan drivers are optional so a stale/missing driver package can never block XFCE itself.
-CORE=(procps xorg-xrandr xkeyboard-config xfce4 xfce4-terminal thunar mousepad pulseaudio dbus mesa)
+CORE=("${CORE_PACKAGES[@]}")
 
 say "Updating package lists"
 rm -f "$MARK"/failed-*.log
