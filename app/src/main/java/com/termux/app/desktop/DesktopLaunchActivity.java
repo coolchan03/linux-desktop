@@ -94,6 +94,7 @@ public class DesktopLaunchActivity extends Activity {
     private boolean mFinished;
     private boolean mResumed;
     private boolean mSetupFinishedInBackground;
+    private boolean mDisplayReady;
     private Step mStep = Step.PREPARE;
     private Runnable mRetryAction;
     private LinearLayout mSteps;
@@ -159,6 +160,7 @@ public class DesktopLaunchActivity extends Activity {
             mSetupFinishedInBackground = false;
             afterSetup();
         }
+        if (mDisplayReady) openDisplay();
     }
 
     @Override
@@ -715,9 +717,8 @@ public class DesktopLaunchActivity extends Activity {
         if (isFinishing() || isDestroyed()) return;
         String status = DesktopLauncher.readStartState();
         if (status.startsWith("ready|")) {
-            Intent display = new Intent().setClassName(getPackageName(), "com.termux.x11.MainActivity");
-            startActivity(display);
-            finish();
+            if (mResumed) openDisplay();
+            else mDisplayReady = true;
         } else if (status.startsWith("failed|")) {
             mFinished = false;
             showError(Step.START, "Could not start X11", status.substring(7), this::startDesktop);
@@ -727,6 +728,13 @@ public class DesktopLaunchActivity extends Activity {
         } else {
             mHandler.postDelayed(() -> pollDesktopStartup(checks + 1), 700);
         }
+    }
+
+    private void openDisplay() {
+        if (isFinishing() || isDestroyed()) return;
+        mDisplayReady = false;
+        startActivity(new Intent().setClassName(getPackageName(), "com.termux.x11.MainActivity"));
+        finish();
     }
 
     @Override

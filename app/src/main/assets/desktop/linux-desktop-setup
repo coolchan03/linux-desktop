@@ -13,7 +13,14 @@ progress() { echo "$1|$2" > "$MARK/progress"; }
 state() { echo "$1" > "$MARK/state"; }
 # Let the Android UI distinguish a genuinely running installer from a stale progress file after a crash.
 echo $$ > "$MARK/setup.pid"
-trap 'rm -f "$MARK/setup.pid"' EXIT
+PARENT=$$
+TICKER=""
+cleanup() {
+  [ -z "$TICKER" ] || kill "$TICKER" 2>/dev/null || true
+  rm -f "$MARK/setup.pid"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM HUP INT
 state running
 progress 1 "Preparing the Linux system"
 
@@ -72,7 +79,7 @@ install_pkg() {
     # activity text rather than incorrectly increasing a guessed percentage.
     (
       elapsed=0
-      while :; do
+      while kill -0 "$PARENT" 2>/dev/null; do
         logline="$(tail -c 4096 "$MARK/last-pkg.log" 2>/dev/null | tr '\r' '\n' | grep -E '^(Get:|Fetched |Unpacking |Setting up |Preparing to unpack |Processing triggers|Reading package lists|Building dependency tree)' | tail -n 1 | cut -c1-110)"
         [ -n "$logline" ] || logline="downloading or configuring dependencies"
         progress "$pct" "Installing $pkgname ($DONE/$TOTAL), ${elapsed}s - $logline"
@@ -81,14 +88,17 @@ install_pkg() {
       done
     ) &
     ticker=$!
+    TICKER=$ticker
     if DEBIAN_FRONTEND=noninteractive pkg install -y "$pkgname" > "$MARK/last-pkg.log" 2>&1; then
       kill "$ticker" 2>/dev/null || true
       wait "$ticker" 2>/dev/null || true
+      TICKER=""
       progress "$((10 + 85 * DONE / TOTAL))" "Installed $pkgname ($DONE/$TOTAL)"
       return 0
     fi
     kill "$ticker" 2>/dev/null || true
     wait "$ticker" 2>/dev/null || true
+    TICKER=""
     cp "$MARK/last-pkg.log" "$MARK/failed-$(printf '%02d' "$DONE")-$pkgname-attempt$attempt.log"
     progress "$pct" "Repairing package manager after $pkgname failed (attempt $attempt)"
     repair >> "$MARK/last-pkg.log" 2>&1 || true

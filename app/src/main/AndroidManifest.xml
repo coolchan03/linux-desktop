@@ -90,6 +90,7 @@
 
         <activity
             android:name=".app.desktop.DesktopLaunchActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|density"
             android:exported="true"
             android:label="@string/desktop_application_name"
             android:icon="@mipmap/ic_desktop"
