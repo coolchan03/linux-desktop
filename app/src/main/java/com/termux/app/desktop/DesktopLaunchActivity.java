@@ -94,6 +94,8 @@ public class DesktopLaunchActivity extends Activity {
     private ProgressBar mBar;
     private Button mRetry;
     private Button mInstall;
+    private Button mPurge;
+    private Button mPurge;
     private RadioGroup mPresets;
     private boolean mBegun;
     private boolean mFinished;
@@ -392,6 +394,11 @@ public class DesktopLaunchActivity extends Activity {
         wide.topMargin = dp(16);
         content.addView(mInstall, wide);
 
+        mPurge = button("Delete old internal copies", false);
+        mPurge.setVisibility(View.GONE);
+        content.addView(mPurge, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
         mRetry = button("Try again", true);
         mRetry.setVisibility(View.GONE);
         mRetry.setOnClickListener(v -> {
@@ -539,6 +546,7 @@ public class DesktopLaunchActivity extends Activity {
         String state = DesktopLauncher.readDataState();
         if (state.startsWith("failed|")) label += "\nLast move failed: " + state.substring(7);
         mStorageText.setText(label);
+        if (mPurge != null) mPurge.setEnabled(!dir.isEmpty() && !DesktopLauncher.dataDirNeedsApplying());
     }
 
     /** "" means internal storage. The files are moved once the desktop is installed (or right away from the shortcut). */
@@ -576,6 +584,25 @@ public class DesktopLaunchActivity extends Activity {
         mStorageBox.setVisibility(View.VISIBLE);
         mInstall.setText("Save");
         mInstall.setVisibility(View.VISIBLE);
+        mPurge.setVisibility(View.VISIBLE);
+        mPurge.setOnClickListener(v -> new AlertDialog.Builder(this)
+            .setTitle("Delete old internal copies?")
+            .setMessage("LXDesk kept these internal copies during storage migration. Only delete them after verifying your files on the selected external storage. This cannot be undone.")
+            .setPositiveButton("Delete backups", (dialog, which) -> {
+                mPurge.setEnabled(false);
+                if (!DesktopLauncher.purgeDataBackups(this)) {
+                    mPurge.setEnabled(true);
+                    Toast.makeText(this, "Could not start backup cleanup.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                mBar.setVisibility(View.VISIBLE);
+                mBar.setIndeterminate(true);
+                mHeadline.setText("Removing old internal backups");
+                mDetail.setText("Checking external storage, then deleting only confirmed internal copies.");
+                mHandler.postDelayed(() -> pollBackupCleanup(0), 700);
+            })
+            .setNegativeButton("Keep backups", null)
+            .show());
         mInstall.setOnClickListener(v -> {
             if (!DesktopLauncher.isBootstrapInstalled()) {
                 Toast.makeText(this, "Finish the desktop setup first.", Toast.LENGTH_LONG).show();
@@ -601,6 +628,27 @@ public class DesktopLaunchActivity extends Activity {
                 }, 900);
             }
         });
+    }
+
+    private void pollBackupCleanup(int polls) {
+        if (isFinishing() || isDestroyed()) return;
+        String state = DesktopLauncher.readDataState();
+        if (state.startsWith("done|")) {
+            mBar.setVisibility(View.GONE);
+            mHeadline.setTextColor(COLOR_DONE);
+            mHeadline.setText("Old backups removed");
+            mDetail.setText(state.substring(5));
+            renderStorage();
+        } else if (state.startsWith("failed|") || polls >= 300) {
+            mBar.setVisibility(View.GONE);
+            mHeadline.setTextColor(COLOR_ERROR);
+            mHeadline.setText("Backup cleanup did not finish");
+            mDetail.setText(state.startsWith("failed|") ? state.substring(7)
+                : "No completion status received. Check Copy debug info before retrying.");
+            renderStorage();
+        } else {
+            mHandler.postDelayed(() -> pollBackupCleanup(polls + 1), 700);
+        }
     }
 
     private void pollDataMove() {

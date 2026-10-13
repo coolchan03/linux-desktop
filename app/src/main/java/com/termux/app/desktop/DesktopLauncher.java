@@ -29,7 +29,7 @@ public class DesktopLauncher {
     private static final String LOG_TAG = "DesktopLauncher";
     private static final String ASSET_DIR = "desktop/";
     private static String sWrittenFromApk;
-    private static final String[] SCRIPTS = {"lxdesk-common.sh", "termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-stop", "linux-desktop-verify"};
+    private static final String[] SCRIPTS = {"lxdesk-common.sh", "termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-purge-backups", "linux-desktop-stop", "linux-desktop-verify"};
 
     private static final File STATE_DIR = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".config/linux-desktop");
     private static final File INSTALLED_MARKER = new File(STATE_DIR, "installed-v1");
@@ -269,6 +269,13 @@ public class DesktopLauncher {
     public static boolean applyDataDir(Context context) {
         resetDataState();
         return isBootstrapInstalled() && writeScripts(context) && runInBackground(context, "linux-desktop-data");
+    }
+
+    /** Explicitly deletes old internal copies only after the script verifies active external storage. */
+    public static boolean purgeDataBackups(Context context) {
+        resetDataState();
+        return isBootstrapInstalled() && writeScripts(context) &&
+            runInBackground(context, "linux-desktop-purge-backups");
     }
 
     /**

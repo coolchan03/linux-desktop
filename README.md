@@ -18,6 +18,7 @@ Get the latest APK from the **[Releases page](../../releases)** (`latest-<branch
 
 - `linux-desktop-arm64-v8a.apk` for almost every phone
 - `linux-desktop-universal.apk` (larger) for any device
+- `SHA256SUMS` to verify the rolling-release APKs
 
 Requires **Android 7 or newer**. Allow "install from unknown sources" when your browser asks. Android may show a one-time "built for an older version of Android" warning; see [Known limitations](#known-limitations).
 
@@ -49,6 +50,8 @@ The Linux system (programs, libraries, settings) always lives on **internal stor
 
 Your **own files** can live elsewhere. Open the icon's **Storage location** shortcut (or choose during first run) to keep `Documents`, `Downloads`, `Pictures`, `Music`, `Videos` and `Projects` on an SD card or in a folder you pick. Files are copied first, nothing is deleted until the copy succeeds, and old data is never removed from the previous place. Needs "All files access". If the card is missing at launch you are asked whether to start anyway or use internal storage.
 
+After moving files to an SD card or another external folder, LXDesk keeps timestamped original internal copies under `~/.config/linux-desktop/backup-*`. The **Storage location → Delete old internal copies** action can free that internal space after you confirm the destination has your files. Cleanup is never automatic; it refuses to run unless the selected external folder is writable, matches the applied destination, and all six home-folder links point to it.
+
 Not moved: your home folder's settings and the Desktop folder, which need real Linux file permissions.
 
 ## How it works
@@ -61,8 +64,9 @@ Not moved: your home folder's settings and the Desktop folder, which need real L
 
 - **"Built for an older version of Android" warning** on newer Android versions. Termux targets Android 9 (SDK 28) on purpose, because newer targets stop programs from running out of the app's storage. This app has no alternative way to start programs yet, so the target is not raised.
 - **Termux add-ons** (Termux:API, Boot, Widget, ...) are tied to the `com.termux` package name and do not work with this app.
-- **Big downloads** (Firefox, VS Code, Wine) take longer because each package is rewritten before installing.
-- **Android 12+** may stop background programs; see the in-app hint about Developer options.
+- **Big downloads** (Firefox, VS Code, Wine) take longer because each package is rewritten before installing. Unpacking and repacking can use approximately five times a package's size in temporary internal storage.
+- **Android 12+** may stop background programs; see the in-app hint about Developer options. On Android 12–13, Wireless debugging/ADB may be needed to change phantom process limits; use the in-app **Copy adb commands** button.
+- **GPU fallback:** if accelerated XFCE fails, LXDesk creates `~/.config/linux-desktop/software-gl` to use software rendering on later launches. Delete that file to try GPU acceleration again.
 - Full only installs optional security/network packages that the device's current repositories actually provide; unavailable packages are skipped and logged.
 - Requires Android 7+; the older "apt-android-5" bootstrap variant is not built.
 
@@ -79,7 +83,9 @@ git submodule update --init --recursive   # X server sources
 ./gradlew assembleDebug
 ```
 
-GitHub Actions does this on every push and publishes the APKs as a pre-release. The package name must stay exactly as long as `com.termux` (10 characters); the app refuses to start otherwise.
+GitHub Actions does this on every push and publishes test-key APKs as a rolling pre-release. The package name must stay exactly as long as `com.termux` (10 characters); the app refuses to start otherwise.
+
+**Owner-signed releases:** A tag matching `v*` triggers `.github/workflows/signed_release.yml`. Set GitHub secrets `KEYSTORE_BASE64` (your own base64-encoded keystore), `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` first. Without them, the signed-release workflow refuses to publish. APKs signed by the public test key cannot be updated in place to an APK signed by your private key; back up important data before uninstalling the test build and reinstalling. Never commit private signing keys.
 
 ## Credits and licenses
 

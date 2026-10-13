@@ -1,0 +1,88 @@
+name: Signed LXDesk release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Fetch Termux X11 submodules
+        run: git submodule update --init --recursive --jobs 8 --depth 1
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Validate owner signing configuration
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing GitHub secret $name; refusing to publish an unsigned APK"
+              exit 1
+            fi
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lxdesk-release.jks"
+          chmod 600 "$RUNNER_TEMP/lxdesk-release.jks"
+          test -s "$RUNNER_TEMP/lxdesk-release.jks"
+
+      - name: Run unit tests and build signed release
+        shell: bash
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/lxdesk-release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          TERMUX_PACKAGE_VARIANT: apt-android-7
+          TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS: '1'
+        run: |
+          set -euo pipefail
+          export TERMUX_APP_VERSION_NAME="${GITHUB_REF_NAME#v}"
+          export TERMUX_APK_VERSION_TAG="${GITHUB_REF_NAME}-apt-android-7-release"
+          ./gradlew :app:testDebugUnitTest :app:assembleRelease
+          test -s "$KEYSTORE_FILE"
+
+      - name: Prepare APKs and SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk_dir="app/build/outputs/apk/release"
+          arm64="$(find "$apk_dir" -maxdepth 1 -type f -name '*_arm64-v8a.apk' -print -quit)"
+          universal="$(find "$apk_dir" -maxdepth 1 -type f -name '*_universal.apk' -print -quit)"
+          test -n "$arm64" && test -s "$arm64"
+          test -n "$universal" && test -s "$universal"
+          mkdir -p release-assets
+          cp "$arm64" release-assets/linux-desktop-arm64-v8a.apk
+          cp "$universal" release-assets/linux-desktop-universal.apk
+          (cd release-assets && sha256sum *.apk > SHA256SUMS)
+
+      - name: Upload signed release artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: lxdesk-signed-${{ github.ref_name }}
+          path: release-assets/*
+
+      - name: Publish tagged release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --verify-tag --title "LXDesk $GITHUB_REF_NAME" --generate-notes
