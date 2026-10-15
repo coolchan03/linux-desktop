@@ -129,7 +129,8 @@ def parse_stanzas(text):
     return stanzas
 
 
-DEP_RE = re.compile(r"^\s*([A-Za-z0-9.+\-]+)(?::[A-Za-z0-9\-]+)?\s*(?:\(\s*(<<|<=|=|>=|>>|<|>)\s*([^)\s]+)\s*\))?\s*$")
+# Termux allows "_" in package names (e.g. qemu-system-x86_64-headless), unlike Debian.
+DEP_RE = re.compile(r"^\s*([A-Za-z0-9._+\-]+)(?::[A-Za-z0-9\-]+)?\s*(?:\(\s*(<<|<=|=|>=|>>|<|>)\s*([^)\s]+)\s*\))?\s*$")
 
 
 def parse_relations(value):
@@ -227,7 +228,12 @@ class Resolver:
                 self.index[name] = stanza
         self.index_providers = {}
         for name, stanza in self.index.items():
-            for virtual, _, _ in provides_of(stanza):
+            try:
+                provided = provides_of(stanza)
+            except ValueError as e:  # one odd package elsewhere in the repository must not stop the build
+                log("warning: ignoring Provides of %s: %s" % (name, e))
+                continue
+            for virtual, _, _ in provided:
                 self.index_providers.setdefault(virtual, []).append(name)
         self.installed = {s["Package"]: s for s in installed_stanzas}
         self.installed_providers = {}
