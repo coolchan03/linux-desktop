@@ -2,6 +2,9 @@
 # Installs the core of the Linux desktop: XFCE4, audio and GPU acceleration. This is the part needed to
 # see a working desktop, so it is kept small; apps and tools follow in the background (linux-desktop-extras).
 # Package selection follows https://github.com/techjarves/termux-hacklab (Mobile HackLab).
+#
+# The APK normally carries these packages (see lxdesk_unpack_pack in lxdesk-common.sh), so they are
+# installed without downloading anything. Without a usable pack they are downloaded instead.
 
 MARK="$HOME/.config/linux-desktop"
 mkdir -p "$MARK"
@@ -60,16 +63,66 @@ repair() {
   DEBIAN_FRONTEND=noninteractive apt-get -f install -y || return 1
   DEBIAN_FRONTEND=noninteractive dpkg --configure -a
 }
+# The bootstrap's config files were rewritten for this app's path, so dpkg sees them as changed locally and
+# would stop at a "keep your version?" question whenever their package is upgraded. Nobody can answer that in
+# a background install: keep the current (already rewritten) file, as dpkg does by default for changed files.
+mkdir -p "$PREFIX/etc/apt/apt.conf.d"
+printf '%s\n' '// Written by LXDesk: never stop at config file questions during background installs.' \
+  'Dpkg::Options { "--force-confdef"; "--force-confold"; };' > "$PREFIX/etc/apt/apt.conf.d/98-lxdesk-dpkg-options"
+
 if ! repair >"$MARK/repair.log" 2>&1; then
   progress 0 "The package manager could not recover. See repair.log for details."
   state failed
   exit 1
 fi
-progress 2 "Updating package lists"
+
+# ---- Desktop packages bundled in the APK ----
+BUNDLE="$PREFIX/var/cache/lxdesk-desktop-pack"
+BUNDLED=0
+bundle_apt() { lxdesk_pack_apt "$BUNDLE" "$@"; }
+
+install_from_bundle() {
+  local total ticker status
+  progress 4 "Unpacking the desktop included in the app"
+  lxdesk_unpack_pack "$BUNDLE" || return 1
+  total="$(wc -l < "$BUNDLE/manifest.txt")"
+  [ "$total" -gt 0 ] || total=1
+  # One apt run installs everything; count finished packages for the progress bar.
+  : > "$MARK/last-pkg.log"
+  (
+    while kill -0 "$PARENT" 2>/dev/null; do
+      done_count="$(grep -c '^Setting up ' "$MARK/last-pkg.log" 2>/dev/null)"
+      [ "${done_count:-0}" -le "$total" ] || done_count=$total
+      logline="$(tail -n 1 "$MARK/last-pkg.log" 2>/dev/null | cut -c1-110)"
+      progress "$((8 + 87 * ${done_count:-0} / total))" "Installing the desktop from the app, no download needed - ${logline:-preparing}"
+      sleep 2
+    done
+  ) &
+  ticker=$!
+  TICKER=$ticker
+  bundle_apt install -y "${CORE_PACKAGES[@]}" x11-repo > "$MARK/last-pkg.log" 2>&1
+  status=$?
+  kill "$ticker" 2>/dev/null || true
+  wait "$ticker" 2>/dev/null || true
+  TICKER=""
+  cat "$MARK/last-pkg.log"
+  return "$status"
+}
+
+say() { printf '\n==> %s\n' "$*"; }
+say "Installing the desktop included in the app"
+if install_from_bundle >"$MARK/bundle.log" 2>&1; then
+  BUNDLED=1
+  progress 95 "Installed the desktop from the app"
+else
+  echo "Bundled desktop packages could not be used; downloading them instead (see bundle.log)"
+  # Leave dpkg consistent for the download path below.
+  [ -f "$BUNDLE/sources.list" ] && bundle_apt -f install -y >>"$MARK/bundle.log" 2>&1
+  DEBIAN_FRONTEND=noninteractive dpkg --configure -a >>"$MARK/bundle.log" 2>&1 || true
+fi
 
 TOTAL=0; DONE=0; FAILED=()
 
-say() { printf '\n==> %s\n' "$*"; }
 install_pkg() {
   DONE=$((DONE + 1))
   local pkgname="$1" attempt logline ticker pct
@@ -114,47 +167,59 @@ install_pkg() {
 # GPU-specific Vulkan drivers are optional so a stale/missing driver package can never block XFCE itself.
 CORE=("${CORE_PACKAGES[@]}")
 
-say "Updating package lists"
 rm -f "$MARK"/failed-*.log
-if ! DEBIAN_FRONTEND=noninteractive pkg update -y >"$MARK/update-initial.log" 2>&1; then
-  progress 0 "Could not update package lists. Check your network and repository settings."
-  state failed
-  exit 1
-fi
-progress 5 "Adding package repositories"
-if ! DEBIAN_FRONTEND=noninteractive pkg install -y x11-repo >"$MARK/repo-x11.log" 2>&1; then
-  progress 0 "Could not enable the X11 package repository. Tap Copy debug info and send it to the developer."
-  state failed
-  exit 1
-fi
-# TUR is useful for optional/community packages but is not required for the XFCE desktop itself.
-# Do not let a temporary TUR issue prevent the desktop from installing.
-DEBIAN_FRONTEND=noninteractive pkg install -y tur-repo >"$MARK/repo-tur.log" 2>&1 || true
-if ! DEBIAN_FRONTEND=noninteractive pkg update -y >"$MARK/update-final.log" 2>&1; then
-  progress 0 "Could not refresh X11 package lists. Check network and repository availability."
-  state failed
-  exit 1
-fi
+if [ "$BUNDLED" = 0 ]; then
+  say "Updating package lists"
+  progress 2 "Updating package lists"
+  if ! DEBIAN_FRONTEND=noninteractive pkg update -y >"$MARK/update-initial.log" 2>&1; then
+    progress 0 "Could not update package lists. Check your network and repository settings."
+    state failed
+    exit 1
+  fi
+  progress 5 "Adding package repositories"
+  if ! DEBIAN_FRONTEND=noninteractive pkg install -y x11-repo >"$MARK/repo-x11.log" 2>&1; then
+    progress 0 "Could not enable the X11 package repository. Tap Copy debug info and send it to the developer."
+    state failed
+    exit 1
+  fi
+  # TUR is useful for optional/community packages but is not required for the XFCE desktop itself.
+  # Do not let a temporary TUR issue prevent the desktop from installing.
+  DEBIAN_FRONTEND=noninteractive pkg install -y tur-repo >"$MARK/repo-tur.log" 2>&1 || true
+  if ! DEBIAN_FRONTEND=noninteractive pkg update -y >"$MARK/update-final.log" 2>&1; then
+    progress 0 "Could not refresh X11 package lists. Check network and repository availability."
+    state failed
+    exit 1
+  fi
 
-TOTAL=${#CORE[@]}
-say "Installing the desktop ($TOTAL packages)"
-for p in "${CORE[@]}"; do install_pkg "$p"; done
+  TOTAL=${#CORE[@]}
+  say "Installing the desktop ($TOTAL packages)"
+  for p in "${CORE[@]}"; do install_pkg "$p"; done
 
-if [ ${#FAILED[@]} -gt 0 ]; then
-  say "Could not install: ${FAILED[*]}"
-  progress 0 "Could not install ${FAILED[0]}. Check your internet connection and try again."
-  state failed
-  exit 1
+  if [ ${#FAILED[@]} -gt 0 ]; then
+    say "Could not install: ${FAILED[*]}"
+    progress 0 "Could not install ${FAILED[0]}. Check your internet connection and try again."
+    state failed
+    exit 1
+  fi
 fi
 
 # Graphics must never make first boot fail. Mesa provides llvmpipe/softpipe as a safe fallback.
 GPU_PROFILE="$HOME/.config/hacklab-gpu.sh"
 : > "$GPU_PROFILE"
-GPU_VENDOR="$(getprop ro.hardware.egl 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+# Background shells only have $PREFIX/bin on PATH, so call Android's getprop directly.
+GPU_VENDOR="$(/system/bin/getprop ro.hardware.egl 2>/dev/null; /system/bin/getprop ro.hardware.vulkan 2>/dev/null)"
+GPU_VENDOR="$(printf '%s' "$GPU_VENDOR" | tr '[:upper:]' '[:lower:]')"
+GPU_PACKAGES=(vulkan-loader-generic mesa-vulkan-icd-freedreno)
+install_gpu_packages() {
+  if [ "$BUNDLED" = 1 ] && bundle_apt install -y "${GPU_PACKAGES[@]}"; then
+    return 0
+  fi
+  DEBIAN_FRONTEND=noninteractive pkg install -y "${GPU_PACKAGES[@]}"
+}
 if echo "$GPU_VENDOR" | grep -q adreno; then
   progress 96 "Enabling optional Adreno GPU acceleration"
   echo "Trying optional Adreno/Turnip acceleration" > "$MARK/gpu.log"
-  if DEBIAN_FRONTEND=noninteractive pkg install -y vulkan-loader-generic mesa-vulkan-icd-freedreno >>"$MARK/gpu.log" 2>&1; then
+  if install_gpu_packages >>"$MARK/gpu.log" 2>&1; then
     cat > "$GPU_PROFILE" <<'EOF'
 export GALLIUM_DRIVER=zink
 export MESA_LOADER_DRIVER_OVERRIDE=zink
@@ -185,6 +250,8 @@ if ! linux-desktop-verify; then
   exit 1
 fi
 touch "$MARK/installed-v1"
+# The bundled packages are installed now; the copy inside the APK remains for repairs.
+rm -rf "$BUNDLE"
 progress 100 "Done"
 state done
 exit 0

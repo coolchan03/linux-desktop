@@ -13,3 +13,48 @@ lxdesk_rotate_log() {
     mv -f "$file" "$file.old"
   fi
 }
+
+# ---- Packages bundled in the APK (liblxdesk-desktop-pack.so, built by scripts/lxdesk-desktop-pack.py) ----
+LXDESK_PACK="@NATIVE_LIB_DIR@/liblxdesk-desktop-pack.so"
+LXDESK_PACK_MARKER="LXDESK_DESKTOP_PACK_BEGIN_V1"
+
+# apt restricted to an unpacked pack: no network, and the regular package lists are left alone.
+lxdesk_pack_apt() {
+  local dir="$1"
+  shift
+  DEBIAN_FRONTEND=noninteractive apt-get -o Dir::Etc::SourceList="$dir/sources.list" -o Dir::Etc::SourceParts=- \
+    -o Dir::State::Lists="$dir/lists" -o APT::Get::List-Cleanup=false "$@"
+}
+
+# The pack is a tar that follows a marker near the start of the library. Prints where the tar starts,
+# as a 1-based byte position for tail -c +N.
+lxdesk_pack_start() {
+  local offset
+  [ -f "$LXDESK_PACK" ] || { echo "No desktop pack in this APK ($LXDESK_PACK)" >&2; return 1; }
+  offset="$(head -c 4194304 "$LXDESK_PACK" | LC_ALL=C grep -obaF "$LXDESK_PACK_MARKER" | head -n 1 | cut -d: -f1)"
+  [ -n "$offset" ] || { echo "This APK was built without desktop packages for $(uname -m)" >&2; return 1; }
+  echo "$((offset + ${#LXDESK_PACK_MARKER} + 2))"
+}
+
+# Prints "package version architecture" for every bundled package without unpacking the pack.
+lxdesk_pack_manifest() {
+  local start
+  start="$(lxdesk_pack_start)" || return 1
+  tail -c +"$start" "$LXDESK_PACK" | tar -xO --occurrence=1 -f - manifest.txt
+}
+
+# Unpacks the pack into DIR as a local apt repository.
+lxdesk_unpack_pack() {
+  local dir="$1" start
+  start="$(lxdesk_pack_start)" || return 1
+  rm -rf "$dir"
+  mkdir -p "$dir/lists/partial" || return 1
+  tail -c +"$start" "$LXDESK_PACK" | tar -x -C "$dir" -f - || return 1
+  [ -s "$dir/Packages" ] || { echo "The desktop pack is empty"; return 1; }
+  printf 'deb [trusted=yes] file:%s ./\n' "$dir" > "$dir/sources.list"
+  lxdesk_pack_apt "$dir" update
+}
+
+lxdesk_is_installed() {
+  dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'
+}

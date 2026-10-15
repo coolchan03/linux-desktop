@@ -52,6 +52,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           TERMUX_PACKAGE_VARIANT: apt-android-7
           TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS: '1'
+          LXDESK_REQUIRE_DESKTOP_PACK: '1'
         run: |
           set -euo pipefail
           export TERMUX_APP_VERSION_NAME="${GITHUB_REF_NAME#v}"
@@ -68,6 +69,8 @@ jobs:
           universal="$(find "$apk_dir" -maxdepth 1 -type f -name '*_universal.apk' -print -quit)"
           test -n "$arm64" && test -s "$arm64"
           test -n "$universal" && test -s "$universal"
+          bash .github/scripts/check-apk-desktop-pack.sh "$arm64" arm64-v8a yes
+          bash .github/scripts/check-apk-desktop-pack.sh "$universal" arm64-v8a yes
           mkdir -p release-assets
           cp "$arm64" release-assets/linux-desktop-arm64-v8a.apk
           cp "$universal" release-assets/linux-desktop-universal.apk

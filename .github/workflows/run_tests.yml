@@ -25,5 +25,7 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
     - name: Execute tests
+      env:
+        LXDESK_BUNDLE_DESKTOP: '0' # unit tests do not need the bundled desktop packages
       run: |
         ./gradlew test

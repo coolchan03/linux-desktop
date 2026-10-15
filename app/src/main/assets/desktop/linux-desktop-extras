@@ -29,23 +29,54 @@ if [ "$PRESET" = minimal ]; then
   exit 0
 fi
 
+. "$PREFIX/bin/lxdesk-common.sh"
+
 APPS=(firefox code-oss git wget curl)
 TOOLS=(nmap netcat-openbsd whois dnsutils tracepath hydra john sqlmap python)
 [ "$(uname -m)" = aarch64 ] && TOOLS+=(hangover-wine)
+WANTED=("${APPS[@]}")
+[ "$PRESET" = full ] && WANTED+=("${TOOLS[@]}" metasploit)
+
+# Apps that were bundled in the APK (LXDESK_DESKTOP_PACK_EXTRA at build time) install without internet.
+FROM_PACK=()
+if MANIFEST="$(lxdesk_pack_manifest 2>/dev/null)"; then
+  for p in "${WANTED[@]}"; do
+    lxdesk_is_installed "$p" || ! grep -q "^$p " <<<"$MANIFEST" || FROM_PACK+=("$p")
+  done
+fi
+if [ ${#FROM_PACK[@]} -gt 0 ]; then
+  BUNDLE="$PREFIX/var/cache/lxdesk-desktop-pack-extras"
+  progress 0 "Installing ${FROM_PACK[*]} from the app"
+  if lxdesk_unpack_pack "$BUNDLE" >"$MARK/extras-bundle.log" 2>&1; then
+    lxdesk_pack_apt "$BUNDLE" install -y "${FROM_PACK[@]}" >>"$MARK/extras-bundle.log" 2>&1 || true
+  fi
+  rm -rf "$BUNDLE"
+fi
+
+MISSING=()
+for p in "${WANTED[@]}"; do lxdesk_is_installed "$p" || MISSING+=("$p"); done
+
+# Everything else comes from the repositories. The desktop core may have been installed from the APK
+# without package lists, so refresh them; without internet, try again on the next desktop start.
+if [ ${#MISSING[@]} -gt 0 ]; then
+  if ! DEBIAN_FRONTEND=noninteractive pkg update -y >"$MARK/extras-update.log" 2>&1; then
+    echo "waiting: no internet or repository unavailable" > "$MARK/extras-state"
+    progress 0 "Apps will be installed the next time the desktop starts with internet"
+    exit 0
+  fi
+  # Installed by the download path of linux-desktop-setup; optional, so failures are ignored.
+  if ! lxdesk_is_installed tur-repo; then
+    DEBIAN_FRONTEND=noninteractive pkg install -y tur-repo >>"$MARK/extras-update.log" 2>&1 &&
+      DEBIAN_FRONTEND=noninteractive pkg update -y >>"$MARK/extras-update.log" 2>&1
+  fi
+fi
+
 # Package names and repositories drift over time. Only queue packages that the device's current
 # repositories actually advertise; missing optional tools must never poison the whole extras pass.
 LIST=(); SKIPPED=()
-queue_if_available() {
-  if dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; then
-    return 0
-  fi
-  if apt-cache show "$1" >/dev/null 2>&1; then LIST+=("$1"); else SKIPPED+=("$1"); fi
-}
-for p in "${APPS[@]}"; do queue_if_available "$p"; done
-if [ "$PRESET" = full ]; then
-  TOOLS+=(metasploit)
-  for p in "${TOOLS[@]}"; do queue_if_available "$p"; done
-fi
+for p in "${MISSING[@]}"; do
+  if apt-cache show "$p" >/dev/null 2>&1; then LIST+=("$p"); else SKIPPED+=("$p"); fi
+done
 printf '%s\n' "${SKIPPED[@]}" > "$MARK/extras-skipped.log"
 
 FAILED=(); N=0; TOTAL=${#LIST[@]}

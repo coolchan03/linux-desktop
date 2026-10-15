@@ -48,6 +48,18 @@ jobs:
         shell: bash
         run: bash .github/scripts/test-data-migration.sh
 
+      - name: Test offline desktop pack builder
+        shell: bash
+        run: bash .github/scripts/test-desktop-pack.sh
+
+      # Packages already downloaded by earlier builds; only changed ones are fetched again.
+      - name: Restore desktop package cache
+        uses: actions/cache@v4
+        with:
+          path: .gradle/lxdesk-desktop-pack
+          key: lxdesk-desktop-pack-${{ github.run_id }}
+          restore-keys: lxdesk-desktop-pack-
+
       - name: Setup java 17
         uses: actions/setup-java@v5
         with:
@@ -88,6 +100,7 @@ jobs:
           export TERMUX_APP_VERSION_NAME="${RELEASE_VERSION_NAME/v/}" # Used by app/build.gradle
           export TERMUX_APK_VERSION_TAG="$APK_VERSION_TAG" # Used by app/build.gradle
           export TERMUX_PACKAGE_VARIANT="${{ env.PACKAGE_VARIANT }}" # Used by app/build.gradle
+          export LXDESK_REQUIRE_DESKTOP_PACK=1 # Never publish an APK that silently lacks the bundled desktop
           if ! ./gradlew assembleDebug; then
             exit_on_error "Build failed for '$APK_VERSION_TAG' build."
           fi
@@ -99,6 +112,12 @@ jobs:
               exit_on_error "Failed to find built APK at '$APK_DIR_PATH/${APK_BASENAME_PREFIX}_$abi.apk'. Files found: "$'\n'"$files_found"
             fi
           done
+
+          echo "Validating the bundled desktop"
+          bash .github/scripts/check-apk-desktop-pack.sh "$APK_DIR_PATH/${APK_BASENAME_PREFIX}_arm64-v8a.apk" arm64-v8a yes || exit_on_error "arm64-v8a APK lacks the desktop pack"
+          bash .github/scripts/check-apk-desktop-pack.sh "$APK_DIR_PATH/${APK_BASENAME_PREFIX}_universal.apk" arm64-v8a yes || exit_on_error "universal APK lacks the desktop pack"
+          bash .github/scripts/check-apk-desktop-pack.sh "$APK_DIR_PATH/${APK_BASENAME_PREFIX}_x86_64.apk" x86_64 no || exit_on_error "x86_64 APK has an unexpected desktop pack"
+          ls -l "$APK_DIR_PATH"
 
           echo "Generating SHA-256 checksum file"
           if ! (cd "$APK_DIR_PATH"; sha256sum \

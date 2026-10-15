@@ -105,8 +105,10 @@ dbus-launch --exit-with-session startxfce4 &
 XFCE_PID=$!
 xfce_ready=0
 tries=0
-# A live shell alone is not proof that the XFCE panel/window manager started.
-while [ "$tries" -lt 40 ]; do
+# A live shell alone is not proof that the XFCE panel/window manager started. The first start on a slow
+# phone (software rendering, cold caches) can take close to a minute; giving up too early would also switch
+# the device to software rendering for good.
+while [ "$tries" -lt 120 ]; do
   if kill -0 "$XFCE_PID" 2>/dev/null && pgrep -x xfwm4 >/dev/null 2>&1 && pgrep -x xfce4-panel >/dev/null 2>&1; then
     xfce_ready=1
     break

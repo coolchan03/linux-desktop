@@ -16,8 +16,8 @@ It combines three projects:
 
 Get the latest APK from the **[Releases page](../../releases)** (`latest-<branch>` tag).
 
-- `linux-desktop-arm64-v8a.apk` for almost every phone
-- `linux-desktop-universal.apk` (larger) for any device
+- `linux-desktop-arm64-v8a.apk` for almost every phone. It includes the whole XFCE desktop, so the desktop installs without downloading anything.
+- `linux-desktop-universal.apk` (larger) for any device. On 64-bit ARM it includes the desktop too; on other processors the desktop is downloaded on first run.
 - `SHA256SUMS` to verify the rolling-release APKs
 
 Requires **Android 7 or newer**. Allow "install from unknown sources" when your browser asks. Android may show a one-time "built for an older version of Android" warning; see [Known limitations](#known-limitations).
@@ -30,7 +30,7 @@ Requires **Android 7 or newer**. Allow "install from unknown sources" when your 
    - **Minimal**: the desktop only
    - **Standard**: plus Firefox, VS Code, git
    - **Full**: plus available security/network tools from the current repositories and Wine on arm64
-4. The desktop core installs first (about 5-10 minutes, needs internet, Wi-Fi recommended) and opens. Apps install in the background while you use it.
+4. The desktop core installs first and opens. It is included in the APK (64-bit ARM), so this step needs no internet and takes a few minutes; without a bundled desktop it is downloaded (about 5-10 minutes, Wi-Fi recommended). Apps install in the background while you use it, as soon as there is internet.
 
 After that, one tap goes straight to the desktop.
 
@@ -57,6 +57,7 @@ Not moved: your home folder's settings and the Desktop folder, which need real L
 ## How it works
 
 - Termux's official bootstrap and packages have `/data/data/com.termux` compiled in. This app's package name `com.lxdesk` is exactly the same length, so the path is rewritten in place: in every bootstrap file as it is unpacked, and in every package by an apt hook (`lxdesk-relocate-debs`) before `dpkg` installs it. Packages stay native, so GPU drivers work.
+- The Linux base system (Termux bootstrap) and the XFCE desktop core with all its dependencies, audio, Mesa and the Adreno GPU drivers are built into the APK. At build time `scripts/lxdesk-desktop-pack.py` resolves the packages against Termux's repositories (skipping what the bootstrap already has), verifies their checksums and rewrites them for `com.lxdesk` ahead of time. The result is a local apt repository embedded in `liblxdesk-desktop-pack.so`, which `linux-desktop-setup` installs from without network access. If it is missing or fails, setup downloads the packages instead.
 - The X server runs from the app's own APK (`termux-x11` wrapper script, `app_process`), so there is no second app or loader package.
 - Setup scripts (`linux-desktop-setup`, `-extras`, `-data`, `-stop`, `linux-desktop`) are bundled in `app/src/main/assets/desktop/` and run as background Termux shells; the loading screen reads their progress files.
 
@@ -64,7 +65,8 @@ Not moved: your home folder's settings and the Desktop folder, which need real L
 
 - **"Built for an older version of Android" warning** on newer Android versions. Termux targets Android 9 (SDK 28) on purpose, because newer targets stop programs from running out of the app's storage. This app has no alternative way to start programs yet, so the target is not raised.
 - **Termux add-ons** (Termux:API, Boot, Widget, ...) are tied to the `com.termux` package name and do not work with this app.
-- **Big downloads** (Firefox, VS Code, Wine) take longer because each package is rewritten before installing. Unpacking and repacking can use approximately five times a package's size in temporary internal storage.
+- **Downloaded packages** (Firefox, VS Code, Wine, anything from `pkg install`) take longer because each one is rewritten before installing. Unpacking and repacking can use approximately five times a package's size in temporary internal storage. The bundled desktop packages are already rewritten.
+- **Only 64-bit ARM carries the desktop** by default, so the universal APK does not quadruple in size; other processors download it. See [Building from source](#building-from-source) to change this.
 - **Android 12+** may stop background programs; see the in-app hint about Developer options. On Android 12–13, Wireless debugging/ADB may be needed to change phantom process limits; use the in-app **Copy adb commands** button.
 - **GPU fallback:** if accelerated XFCE fails, LXDesk creates `~/.config/linux-desktop/software-gl` to use software rendering on later launches. Delete that file to try GPU acceleration again.
 - Full only installs optional security/network packages that the device's current repositories actually provide; unavailable packages are skipped and logged.
@@ -82,6 +84,15 @@ Not moved: your home folder's settings and the Desktop folder, which need real L
 git submodule update --init --recursive   # X server sources
 ./gradlew assembleDebug
 ```
+
+Building needs `python3` (for the bundled desktop) and internet access to Termux's package repositories. Downloaded packages are cached in `.gradle/lxdesk-desktop-pack/`, so later builds only fetch what changed. Environment variables:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `LXDESK_BUNDLE_DESKTOP` | `1` | `0` builds without the bundled desktop (it is then downloaded on first run) |
+| `LXDESK_DESKTOP_PACK_ARCHS` | `aarch64` | Architectures that get the desktop: any of `aarch64 arm i686 x86_64` |
+| `LXDESK_DESKTOP_PACK_EXTRA` | | More packages to bundle, e.g. `firefox code-oss git` (each adds its size to the APK) |
+| `LXDESK_REQUIRE_DESKTOP_PACK` | `0` | `1` fails the build if the desktop cannot be bundled, instead of building without it (CI sets this) |
 
 GitHub Actions does this on every push and publishes test-key APKs as a rolling pre-release. The package name must stay exactly as long as `com.termux` (10 characters); the app refuses to start otherwise.
 

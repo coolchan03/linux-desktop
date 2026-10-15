@@ -527,9 +527,15 @@ public class DesktopLaunchActivity extends Activity {
         renderSteps(Step.INSTALL, false);
         mHeadline.setTextColor(COLOR_TEXT);
         mHeadline.setText("What should be installed?");
-        mDetail.setText("The desktop installs first (about 5-10 minutes). Apps install in the background so you can start using it right away.\n\n"
+        boolean bundled = DesktopLauncher.hasBundledDesktop(this);
+        mDetail.setText((bundled
+                ? "The desktop is included in the app and installs without downloading (a few minutes). "
+                    + "Standard and Full download their apps in the background so you can start using the desktop right away.\n\n"
+                : "The desktop installs first (about 5-10 minutes). Apps install in the background so you can start using it right away.\n\n")
             + "Free storage: " + String.format(Locale.US, "%.1f", freeStorageGb()) + " GB. Needed: Minimal " + (int) DesktopLauncher.Preset.MINIMAL.requiredStorageGb + " GB, Standard " + (int) DesktopLauncher.Preset.STANDARD.requiredStorageGb + " GB, Full " + (int) DesktopLauncher.Preset.FULL.requiredStorageGb + " GB.\n"
-            + (hasInternet() ? "Wi-Fi is recommended; the download is large." : "No internet connection detected. Connect before installing."));
+            + (bundled
+                ? (hasInternet() ? "Apps will download over your connection; Wi-Fi is recommended." : "No internet needed for the desktop. Apps install once you are online.")
+                : (hasInternet() ? "Wi-Fi is recommended; the download is large." : "No internet connection detected. Connect before installing.")));
         mBar.setVisibility(View.GONE);
         mPresets.setVisibility(View.VISIBLE);
         renderStorage();
@@ -688,7 +694,9 @@ public class DesktopLaunchActivity extends Activity {
     private void runSetup() {
         DesktopLauncher.Progress p = DesktopLauncher.readProgress();
         boolean alreadyRunning = "running".equals(p.state) && p.active;
-        if (!alreadyRunning && !hasInternet()) {
+        boolean bundled = DesktopLauncher.hasBundledDesktop(this);
+        // With the desktop bundled in the APK, only the optional apps need internet, and they wait for it.
+        if (!alreadyRunning && !bundled && !hasInternet()) {
             showError(Step.INSTALL, "No internet connection",
                 "Connect to Wi-Fi or mobile data, then try again.", this::runSetup);
             return;
@@ -699,7 +707,8 @@ public class DesktopLaunchActivity extends Activity {
             return;
         }
         if (!alreadyRunning) {
-            setProgress(Step.INSTALL, "Installing the desktop", "This takes about 5-10 minutes and needs internet.", 0);
+            setProgress(Step.INSTALL, "Installing the desktop",
+                bundled ? "This takes a few minutes. No download is needed." : "This takes about 5-10 minutes and needs internet.", 0);
             DesktopLauncher.resetProgress();
             mSetupStartedAt = SystemClock.elapsedRealtime();
             if (!DesktopLauncher.startSetup(this)) {
@@ -895,7 +904,8 @@ public class DesktopLaunchActivity extends Activity {
         } else if (status.startsWith("failed|")) {
             mFinished = false;
             showError(Step.START, "Could not start X11", status.substring(7), this::startDesktop);
-        } else if (checks >= 120) {
+        } else if (checks >= 260) {
+            // ~3 minutes: X11 (up to 15 s) and XFCE (up to 60 s) startup, once more after a GPU fallback.
             mFinished = false;
             showError(Step.START, "X11 startup timed out", "Check the X11 and desktop logs using Copy debug info.", this::startDesktop);
         } else {

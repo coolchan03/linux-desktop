@@ -67,6 +67,36 @@ public class DesktopLauncher {
         return true;
     }
 
+    private static final String DESKTOP_PACK_LIBRARY = "liblxdesk-desktop-pack.so";
+    private static final byte[] DESKTOP_PACK_MARKER = "LXDESK_DESKTOP_PACK_BEGIN_V1\n".getBytes(StandardCharsets.US_ASCII);
+    private static String sDesktopPackCheckedFor;
+    private static boolean sHasDesktopPack;
+
+    /**
+     * True when this APK carries the desktop packages for this device's architecture (see
+     * scripts/lxdesk-desktop-pack.py), so the desktop core installs without internet. The marker is near the
+     * start of the library; linux-desktop-setup looks for it the same way.
+     */
+    public static synchronized boolean hasBundledDesktop(Context context) {
+        File pack = new File(context.getApplicationInfo().nativeLibraryDir, DESKTOP_PACK_LIBRARY);
+        String key = pack.getPath() + ":" + pack.lastModified();
+        if (key.equals(sDesktopPackCheckedFor)) return sHasDesktopPack;
+        boolean found = false;
+        try (InputStream in = new java.io.BufferedInputStream(new java.io.FileInputStream(pack))) {
+            int matched = 0, b;
+            for (int read = 0; read < 4 * 1024 * 1024 && (b = in.read()) != -1; read++) {
+                if (b == (DESKTOP_PACK_MARKER[matched] & 0xff)) matched++;
+                else matched = b == (DESKTOP_PACK_MARKER[0] & 0xff) ? 1 : 0;
+                if (matched == DESKTOP_PACK_MARKER.length) { found = true; break; }
+            }
+        } catch (IOException e) {
+            Logger.logDebug(LOG_TAG, "No desktop pack: " + e.getMessage());
+        }
+        sDesktopPackCheckedFor = key;
+        sHasDesktopPack = found;
+        return found;
+    }
+
     public static boolean isBootstrapInstalled() {
         return new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, "bash").exists();
     }
@@ -330,7 +360,8 @@ public class DesktopLauncher {
             .append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(", Android ").append(Build.VERSION.RELEASE)
             .append(" (SDK ").append(Build.VERSION.SDK_INT).append("), ").append(Build.SUPPORTED_ABIS[0]).append('\n')
             .append("bootstrap installed: ").append(isBootstrapInstalled())
-            .append(", desktop installed: ").append(isInstalled()).append('\n');
+            .append(", desktop installed: ").append(isInstalled())
+            .append(", desktop bundled in APK: ").append(hasBundledDesktop(context)).append('\n');
         Progress p = readProgress();
         out.append("setup state: ").append(p.state).append(" ").append(p.percent).append("% ").append(p.message)
             .append(", process active: ").append(p.active).append('\n');
@@ -360,9 +391,11 @@ public class DesktopLauncher {
                 "etc/termux/termux-bootstrap/second-stage/termux-bootstrap-second-stage.sh.lock").exists()).append('\n');
         appendTail(out, "bootstrap-error.log", new File(context.getFilesDir(), "bootstrap-error.log"), 40);
         appendTail(out, "setup.log", new File(STATE_DIR, "setup.log"), 60);
+        appendTail(out, "bundle.log", new File(STATE_DIR, "bundle.log"), 40);
         appendTail(out, "verify.log", new File(STATE_DIR, "verify.log"), 30);
         appendTail(out, "last-pkg.log", new File(STATE_DIR, "last-pkg.log"), 35);
         appendTail(out, "last-extra.log", new File(STATE_DIR, "last-extra.log"), 35);
+        appendTail(out, "extras-update.log", new File(STATE_DIR, "extras-update.log"), 20);
         appendTail(out, "repair.log", new File(STATE_DIR, "repair.log"), 30);
         appendTail(out, "update-initial.log", new File(STATE_DIR, "update-initial.log"), 30);
         appendTail(out, "update-final.log", new File(STATE_DIR, "update-final.log"), 30);

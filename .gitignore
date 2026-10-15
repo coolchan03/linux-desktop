@@ -37,3 +37,8 @@ local.properties
 .swp
 ehthumbs.db
 Thumbs.db
+
+# Offline desktop pack, built by the bundleDesktopPackages Gradle task
+desktop-pack-*.tar
+desktop-pack-*.tar.tmp
+lxdesk-desktop-pack-stamp.h

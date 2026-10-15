@@ -26,6 +26,12 @@ relocate_deb() {
     deb=$1
     base="${TMPDIR:-@PREFIX@/tmp}"
 
+    # Packages bundled in the APK were already rewritten when the app was built.
+    if [ "$(dpkg-deb -f "$deb" LXDesk-Relocated 2>/dev/null)" = "$NEW_PKG" ]; then
+        log "already relocated $(basename "$deb")"
+        return 0
+    fi
+
     # Unpacking and repacking needs a few times the package size. Fail clearly instead of
     # filling the storage and leaving a half-installed package.
     size_kb=$(( $(wc -c < "$deb") / 1024 ))
