@@ -1,0 +1,136 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Starts the Linux desktop and shows it in this app's built-in display.
+mkdir -p "$HOME/.config/linux-desktop"
+. "$PREFIX/bin/lxdesk-common.sh"
+lxdesk_rotate_log "$HOME/.config/linux-desktop/desktop.log"
+MARK="$HOME/.config/linux-desktop/installed-v1"
+STATUS="$HOME/.config/linux-desktop/start-state"
+echo "starting|Preparing X11" > "$STATUS"
+# When started by the app (no terminal), keep a log for troubleshooting.
+[ -t 1 ] || exec >>"$HOME/.config/linux-desktop/desktop.log" 2>&1
+
+if [ ! -f "$MARK" ] || ! command -v startxfce4 >/dev/null 2>&1 || ! command -v xfce4-session >/dev/null 2>&1 || ! command -v xfce4-panel >/dev/null 2>&1 || ! command -v dbus-launch >/dev/null 2>&1; then
+  echo "First launch: installing your Linux desktop. This takes 15-30 minutes and needs internet."
+  linux-desktop-setup || { echo "failed|Setup did not finish" > "$STATUS"; echo "Setup did not finish."; exit 1; }
+fi
+
+# Detect the actual XFCE and X11 processes before stopping anything: the old PID
+# was the launcher shell, not startxfce4, so relaunching killed live sessions.
+X11_SOCKET="${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
+if [ "${LXDESK_GPU_RETRY:-0}" != 1 ] && pgrep -x xfce4-session >/dev/null 2>&1 && pgrep -f 'termux-x11' >/dev/null 2>&1 && [ -S "$X11_SOCKET" ]; then
+  echo "ready|Desktop already running" > "$STATUS"
+  exit 0
+fi
+PIDFILE="$HOME/.config/linux-desktop/desktop.pid"
+echo $$ > "$PIDFILE"
+
+# Use software rendering after a GPU-profile startup failure.
+SOFTWARE_GL="$HOME/.config/linux-desktop/software-gl"
+GPU_PROFILE="$HOME/.config/hacklab-gpu.sh"
+GPU_PROFILE_USED=0
+if [ -f "$SOFTWARE_GL" ]; then
+  unset GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE TU_DEBUG VK_ICD_FILENAMES
+  export LIBGL_ALWAYS_SOFTWARE=1
+elif [ -s "$GPU_PROFILE" ]; then
+  source "$GPU_PROFILE" 2>/dev/null
+  GPU_PROFILE_USED=1
+fi
+
+pkill -x termux-x11 2>/dev/null || pkill -f '^termux-x11 ' 2>/dev/null || true
+for proc in xfce4-session xfwm4 xfce4-panel xfdesktop; do
+  pkill -x "$proc" 2>/dev/null || true
+done
+pulseaudio --kill 2>/dev/null
+sleep 0.5
+
+unset PULSE_SERVER
+pulseaudio --start --exit-idle-time=-1 --daemonize=yes
+
+# Apps and tools install in the background so the desktop appears as soon as the core is ready.
+(linux-desktop-extras >/dev/null 2>&1 &)
+
+X11_LOG="$HOME/.config/linux-desktop/x11.log"
+: > "$X11_LOG"
+# A crashed X server can leave the Unix socket node behind. Do not mistake that stale file for a
+# newly-ready server on the next launch.
+rm -f "$X11_SOCKET" 2>/dev/null
+termux-x11 :0 -ac >>"$X11_LOG" 2>&1 &
+X11_PID=$!
+tries=0
+while [ ! -S "$X11_SOCKET" ] && [ $tries -lt 150 ]; do
+  if ! kill -0 "$X11_PID" 2>/dev/null; then
+    echo "failed|Embedded X11 process exited before readiness. See x11.log" > "$STATUS"
+    wait "$X11_PID" 2>/dev/null; exit_code=$?
+    echo "Embedded X11 exited (code $exit_code). See x11.log and Android logcat."
+    exit 1
+  fi
+  sleep 0.1
+  tries=$((tries + 1))
+done
+if [ ! -S "$X11_SOCKET" ]; then
+  echo "failed|X11 socket not ready. See x11.log" > "$STATUS"
+  echo "The embedded X11 server did not become ready."
+  kill "$X11_PID" 2>/dev/null || true
+  exit 1
+fi
+# Expose Android's shared storage using ordinary filesystem links. Linux
+# apps inherit Android's storage sandbox; protected /data and /system paths
+# remain inaccessible without root.
+mkdir -p "$HOME/Desktop" "$HOME/.local/share" "$PREFIX/tmp"
+[ -e "$HOME/Android-Storage" ] || [ -L "$HOME/Android-Storage" ] || ln -s /storage "$HOME/Android-Storage"
+[ -d /storage/emulated/0 ] && [ ! -e "$HOME/Android-Internal" ] && [ ! -L "$HOME/Android-Internal" ] && ln -s /storage/emulated/0 "$HOME/Android-Internal"
+# Use Thunar's native launcher: no substitute/custom file browser.
+[ ! -e "$HOME/Desktop/Android-Storage.desktop" ] && printf '[Desktop Entry]\nType=Application\nName=Android storage\nExec=thunar %s\nIcon=folder\nTerminal=false\n' "$HOME/Android-Storage" > "$HOME/Desktop/Android-Storage.desktop"
+[ ! -e "$HOME/Desktop/File-Manager.desktop" ] && printf '[Desktop Entry]\nType=Application\nName=File Manager\nExec=thunar\nIcon=system-file-manager\nTerminal=false\n' > "$HOME/Desktop/File-Manager.desktop"
+for shortcut in "$HOME/Desktop/"*.desktop; do
+  [ -f "$shortcut" ] && /system/bin/chmod 755 "$shortcut"
+done
+export XDG_RUNTIME_DIR="${TMPDIR:-$PREFIX/tmp}"
+export XDG_DATA_DIRS="$PREFIX/share:/usr/local/share:/usr/share"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+# Capture failures from standard programs to help diagnose broken app launches.
+for app in thunar xfce4-terminal dbus-launch; do
+  if ! command -v "$app" >/dev/null 2>&1; then
+    echo "Missing desktop executable: $app" >> "$HOME/.config/linux-desktop/desktop-apps.log"
+  fi
+done
+export DISPLAY=:0
+echo "starting|X11 socket ready; starting XFCE" > "$STATUS"
+
+# Bring the built-in display to the front in the Android user/profile that launched this app.
+echo "Launching embedded display from LXDesk activity"
+
+dbus-launch --exit-with-session startxfce4 &
+XFCE_PID=$!
+xfce_ready=0
+tries=0
+# A live shell alone is not proof that the XFCE panel/window manager started.
+while [ "$tries" -lt 40 ]; do
+  if kill -0 "$XFCE_PID" 2>/dev/null && pgrep -x xfwm4 >/dev/null 2>&1 && pgrep -x xfce4-panel >/dev/null 2>&1; then
+    xfce_ready=1
+    break
+  fi
+  kill -0 "$XFCE_PID" 2>/dev/null || break
+  sleep 0.5
+  tries=$((tries + 1))
+done
+if [ "$xfce_ready" -ne 1 ]; then
+  if [ "$GPU_PROFILE_USED" -eq 1 ] && [ ! -f "$SOFTWARE_GL" ]; then
+    echo "GPU XFCE launch failed; retrying once with software rendering" >> "$HOME/.config/linux-desktop/desktop.log"
+    touch "$SOFTWARE_GL"
+    kill "$XFCE_PID" 2>/dev/null || true
+    unset GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE TU_DEBUG VK_ICD_FILENAMES
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export LXDESK_GPU_RETRY=1
+    exec "$0"
+  fi
+  echo "failed|XFCE did not start (window manager or panel missing). See desktop.log" > "$STATUS"
+  kill "$XFCE_PID" 2>/dev/null || true
+  exit 1
+fi
+echo "ready|X11 and XFCE are running" > "$STATUS"
+wait "$XFCE_PID"
+RESULT=$?
+echo "failed|XFCE session ended (exit $RESULT). See desktop.log" > "$STATUS"
+exit "$RESULT"

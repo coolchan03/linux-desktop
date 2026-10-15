@@ -1,6 +1,5 @@
 package com.termux.app;
 
-import android.app.Application;
 import android.content.Context;
 
 import com.termux.BuildConfig;
@@ -16,11 +15,14 @@ import com.termux.shared.termux.shell.command.environment.TermuxShellEnvironment
 import com.termux.shared.termux.shell.am.TermuxAmSocketServer;
 import com.termux.shared.termux.shell.TermuxShellManager;
 import com.termux.shared.termux.theme.TermuxThemeUtils;
+import com.termux.x11.LorieApp;
 
-public class TermuxApplication extends Application {
+/** Extends the embedded Termux:X11 application so its preferences, notification and X server broadcasts work in-process. */
+public class TermuxApplication extends LorieApp {
 
     private static final String LOG_TAG = "TermuxApplication";
 
+    @Override
     public void onCreate() {
         super.onCreate();
 

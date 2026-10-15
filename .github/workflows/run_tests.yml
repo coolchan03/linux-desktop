@@ -16,6 +16,9 @@ jobs:
     steps:
     - name: Clone repository
       uses: actions/checkout@v6
+
+    - name: Fetch Termux:X11 source submodules
+      run: git submodule update --init --recursive --jobs 8 --depth 1
     - name: Setup java 17
       uses: actions/setup-java@v5
       with:

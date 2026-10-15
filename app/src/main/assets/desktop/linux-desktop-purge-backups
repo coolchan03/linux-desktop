@@ -1,0 +1,3 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Explicit user-approved cleanup only; linux-desktop-data validates destination and links.
+exec "$PREFIX/bin/linux-desktop-data" --purge-backups

@@ -2,7 +2,7 @@
 
 <!DOCTYPE resources [
     <!ENTITY TERMUX_PACKAGE_NAME "com.termux">
-    <!ENTITY TERMUX_APP_NAME "Termux">
+    <!ENTITY TERMUX_APP_NAME "LXDesk">
     <!ENTITY TERMUX_API_APP_NAME "Termux:API">
     <!ENTITY TERMUX_BOOT_APP_NAME "Termux:Boot">
     <!ENTITY TERMUX_FLOAT_APP_NAME "Termux:Float">
@@ -14,6 +14,9 @@
 <resources>
 
     <string name="application_name">&TERMUX_APP_NAME;</string>
+    <string name="desktop_application_name">LXDesk</string>
+    <string name="action_stop_desktop">Stop desktop</string>
+    <string name="action_data_folder">Storage location</string>
     <string name="shared_user_label">&TERMUX_APP_NAME; user</string>
 
 
