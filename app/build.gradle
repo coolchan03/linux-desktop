@@ -260,3 +260,9 @@ afterEvaluate {
         variant.javaCompileProvider.get().dependsOn(downloadBootstraps)
     }
 }
+
+// Native assembly reads bootstrap-*.zip directly; it must wait for the verified
+// bootstrap downloads, not only for Java compilation.
+tasks.matching { it.name.startsWith("buildNdkBuild") }.configureEach {
+    dependsOn downloadBootstraps
+}
