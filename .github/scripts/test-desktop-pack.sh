@@ -163,12 +163,12 @@ grep -q '^Inst libfoo \[1.0\] (2.0' "$WORK/simulate.log" || fail "apt does not u
 if command -v clang >/dev/null && command -v ld.lld >/dev/null; then
   ELF="$WORK/elf"
   mkdir -p "$ELF/lib"
-  cp "$ROOT/app/src/main/cpp/lxdesk-desktop-pack.S" "$ROOT/app/src/main/cpp/lxdesk-desktop-pack.c" "$ELF/"
+  cp "$ROOT/app/src/main/cpp/lxdesk-desktop-pack.S" "$ROOT/app/src/main/cpp/lxdesk-desktop-pack-ref.c" "$ELF/"
   cp "$WORK/pack.tar" "$ELF/desktop-pack-aarch64.tar"
   printf '#define LXDESK_PACK_AARCH64 1\n#define LXDESK_PACK_ARM 0\n#define LXDESK_PACK_I686 0\n#define LXDESK_PACK_X86_64 0\n' > "$ELF/lxdesk-desktop-pack-stamp.h"
   (cd "$ELF" &&
     clang --target=aarch64-linux-android24 -fPIC -I. -c lxdesk-desktop-pack.S -o pack.o &&
-    clang --target=aarch64-linux-android24 -fPIC -std=c11 -Wall -Wextra -Werror -Os -c lxdesk-desktop-pack.c -o ref.o &&
+    clang --target=aarch64-linux-android24 -fPIC -std=c11 -Wall -Wextra -Werror -Os -c lxdesk-desktop-pack-ref.c -o ref.o &&
     ld.lld -shared -z max-page-size=16384 --gc-sections pack.o ref.o -o lib/liblxdesk-desktop-pack.so)
   sed "s#@NATIVE_LIB_DIR@#$ELF/lib#" "$ROOT/app/src/main/assets/desktop/lxdesk-common.sh" > "$WORK/lxdesk-common.sh"
   printf 'Dir::State::status "%s";\nDir::Cache "%s";\nDir::Etc::Parts "%s";\nDir::Etc::PreferencesParts "%s";\nAPT::Architecture "%s";\nAPT::Architectures { "%s"; };\nDebug::NoLocking "1";\n' \
