@@ -19,6 +19,18 @@ mkdir -p "$mark" "$HOME/Documents" "$target"
 printf 'LXDesk migration sample\n' > "$HOME/Documents/sample.txt"
 printf '%s\n' "$target" > "$mark/datadir"
 
+# Existing destination content must never be overwritten by migration.
+mkdir -p "$target/Documents"
+printf 'separate destination data\n' > "$target/Documents/sample.txt"
+if bash "$script"; then
+  echo 'ERROR: migration overwrote a conflicting destination file' >&2
+  exit 1
+fi
+test "$(cat "$target/Documents/sample.txt")" = 'separate destination data'
+test -f "$HOME/Documents/sample.txt"
+test ! -L "$HOME/Documents"
+rm -f "$target/Documents/sample.txt"
+
 bash "$script"
 test -L "$HOME/Documents"
 test "$(readlink "$HOME/Documents")" = "$target/Documents"

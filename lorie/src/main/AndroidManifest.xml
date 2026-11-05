@@ -58,13 +58,13 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <receiver android:name=".LoriePreferences$Receiver" android:exported="true" tools:ignore="ExportedReceiver" android:enabled="true">
+        <receiver android:name=".LoriePreferences$Receiver" android:exported="false" android:enabled="true">
             <intent-filter>
                 <action android:name="com.termux.x11.CHANGE_PREFERENCE" />
             </intent-filter>
         </receiver>
 
-        <receiver android:name=".LorieApp$Receiver" android:exported="true" tools:ignore="ExportedReceiver" android:enabled="true">
+        <receiver android:name=".LorieApp$Receiver" android:exported="false" android:enabled="true">
             <intent-filter>
                 <action android:name="com.termux.x11.CmdEntryPoint.ACTION_START" />
                 <action android:name="com.termux.x11.ACTION_STOP" />

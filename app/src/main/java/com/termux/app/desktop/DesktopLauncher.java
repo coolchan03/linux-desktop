@@ -28,8 +28,7 @@ public class DesktopLauncher {
 
     private static final String LOG_TAG = "DesktopLauncher";
     private static final String ASSET_DIR = "desktop/";
-    private static String sWrittenFromApk;
-    private static final String[] SCRIPTS = {"lxdesk-common.sh", "termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-purge-backups", "linux-desktop-stop", "linux-desktop-verify"};
+    private static final String[] SCRIPTS = {"lxdesk-common.sh", "termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-purge-backups", "linux-desktop-stop", "linux-desktop-verify", "linux-desktop-doctor"};
 
     private static final File STATE_DIR = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".config/linux-desktop");
     private static final File INSTALLED_MARKER = new File(STATE_DIR, "installed-v1");
@@ -485,17 +484,7 @@ public class DesktopLauncher {
 
     private static synchronized boolean writeScripts(Context context) {
         String apkPath = context.getApplicationInfo().sourceDir;
-        // Revalidate installed files if a bootstrap reset removed the bin directory.
-        if (apkPath.equals(sWrittenFromApk)) {
-            boolean stillInstalled = true;
-            for (String name : SCRIPTS) {
-                if (!new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, name).canExecute()) {
-                    stillInstalled = false;
-                    break;
-                }
-            }
-            if (stillInstalled) return true;
-        }
+        // Always compare installed scripts with the APK; same path is not proof of integrity.
         for (String name : SCRIPTS) {
             try (InputStream in = context.getAssets().open(ASSET_DIR + name)) {
                 String body = PathRelocator.relocate(new String(readAll(in), StandardCharsets.UTF_8))
@@ -518,17 +507,23 @@ public class DesktopLauncher {
                         continue;
                     }
                 }
-                if (out.exists() && !out.delete()) throw new IOException("Cannot replace " + out);
-                com.termux.shared.errors.Error error = FileUtils.writeTextToFile(name, out.getAbsolutePath(),
-                    StandardCharsets.UTF_8, body, false);
-                if (error != null) throw new IOException(error.getMinimalErrorString());
-                if (!out.setExecutable(true, false)) throw new IOException("Cannot chmod " + out);
+                // Write alongside the existing script, then rename over it atomically.
+                // A failed write must never leave an installed executable half-written.
+                File staged = new File(out.getParentFile(), "." + name + ".tmp-" + android.os.Process.myPid());
+                try {
+                    com.termux.shared.errors.Error error = FileUtils.writeTextToFile(name, staged.getAbsolutePath(),
+                        StandardCharsets.UTF_8, body, false);
+                    if (error != null) throw new IOException(error.getMinimalErrorString());
+                    if (!staged.setExecutable(true, false)) throw new IOException("Cannot chmod " + staged);
+                    if (!staged.renameTo(out)) throw new IOException("Cannot safely replace " + out);
+                } finally {
+                    staged.delete();
+                }
             } catch (IOException e) {
                 Logger.logStackTraceWithMessage(LOG_TAG, "Failed to install " + name, e);
                 return false;
             }
         }
-        sWrittenFromApk = apkPath;
         return true;
     }
 
