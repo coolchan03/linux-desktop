@@ -675,7 +675,7 @@ public class DesktopLaunchActivity extends Activity {
         try {
             return new StatFs(getFilesDir().getPath()).getAvailableBytes() / 1e9;
         } catch (Exception e) {
-            return Double.MAX_VALUE; // unknown: do not block
+            return 0; // unknown: fail closed rather than risk filling device storage
         }
     }
 
@@ -683,7 +683,8 @@ public class DesktopLaunchActivity extends Activity {
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm == null || cm.getActiveNetwork() == null) return false;
         NetworkCapabilities caps = cm.getNetworkCapabilities(cm.getActiveNetwork());
-        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
     }
 
     private void runSetup() {

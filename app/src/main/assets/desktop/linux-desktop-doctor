@@ -1,0 +1,23 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# LXDesk read-only repair diagnostics. Never changes installed files or user data.
+set -u
+mark="$HOME/.config/linux-desktop"
+check() { if "$@" >/dev/null 2>&1; then echo "PASS $*"; else echo "FAIL $*"; fi; }
+printf 'LXDesk desktop health check\n'
+printf 'Android architecture: %s\n' "$(getprop ro.product.cpu.abi 2>/dev/null || echo unknown)"
+printf 'Prefix: %s\n' "$PREFIX"
+for app in bash termux-x11 startxfce4 xfce4-session xfwm4 xfce4-panel dbus-launch thunar; do
+  if command -v "$app" >/dev/null 2>&1; then echo "PASS command: $app"; else echo "FAIL command: $app"; fi
+done
+check test -d "$HOME"
+check test -d "$PREFIX"
+check test -f "$mark/installed-v1"
+check pgrep -x xfce4-session
+check pgrep -x xfwm4
+check pgrep -x xfce4-panel
+check test -S "${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
+printf 'Storage free: '; df -h "$HOME" 2>/dev/null | tail -n 1 || true
+for state in state start-state data-state extras-state; do
+  if [ -f "$mark/$state" ]; then printf '%s: ' "$state"; head -n 1 "$mark/$state"; fi
+done
+printf 'No changes were made. Review ~/.config/linux-desktop/*.log for details.\n'

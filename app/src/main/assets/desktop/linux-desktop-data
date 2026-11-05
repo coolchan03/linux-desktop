@@ -52,6 +52,58 @@ backup_size_kb() {
   echo "$total"
 }
 
+# Never overwrite existing target files during migration, including on retries.
+copy_verified() {
+  local from="$1" to="$2" item rel other
+  while IFS= read -r -d '' item; do
+    rel="${item#"$from"/}"
+    other="$to/$rel"
+    if [ -e "$other" ] || [ -L "$other" ]; then
+      if [ -L "$item" ]; then
+        [ -L "$other" ] && [ "$(readlink "$item")" = "$(readlink "$other")" ] || return 1
+      elif [ -f "$item" ]; then
+        [ -f "$other" ] && [ ! -L "$other" ] && cmp -s "$item" "$other" || return 1
+      elif [ -d "$item" ]; then
+        [ -d "$other" ] && [ ! -L "$other" ] || return 1
+      else
+        return 1
+      fi
+    fi
+  done < <(find "$from" -mindepth 1 -print0)
+  cp -rn "$from/." "$to/" || return 1
+  while IFS= read -r -d '' item; do
+    rel="${item#"$from"/}"
+    other="$to/$rel"
+    if [ -L "$item" ]; then
+      [ -L "$other" ] && [ "$(readlink "$item")" = "$(readlink "$other")" ] || return 1
+    elif [ -f "$item" ]; then
+      [ -f "$other" ] && [ ! -L "$other" ] && cmp -s "$item" "$other" || return 1
+    elif [ -d "$item" ]; then
+      [ -d "$other" ] && [ ! -L "$other" ] || return 1
+    else
+      return 1
+    fi
+  done < <(find "$from" -mindepth 1 -print0)
+}
+
+# Backups can only be deleted after every saved entry matches its current destination.
+backup_verified() {
+  local from="$1" to="$2" item rel other
+  while IFS= read -r -d '' item; do
+    rel="${item#"$from"/}"
+    other="$to/$rel"
+    if [ -L "$item" ]; then
+      [ -L "$other" ] && [ "$(readlink "$item")" = "$(readlink "$other")" ] || return 1
+    elif [ -f "$item" ]; then
+      [ -f "$other" ] && [ ! -L "$other" ] && cmp -s "$item" "$other" || return 1
+    elif [ -d "$item" ]; then
+      [ -d "$other" ] && [ ! -L "$other" ] || return 1
+    else
+      return 1
+    fi
+  done < <(find "$from" -mindepth 1 -print0)
+}
+
 if [ "${1:-}" = "--purge-backups" ]; then
   applied="$(cat "$MARK/datadir-applied" 2>/dev/null)"
   [ -n "$TARGET" ] && [ "$TARGET" = "$applied" ] ||
@@ -67,11 +119,23 @@ if [ "${1:-}" = "--purge-backups" ]; then
     [ -L "$HOME/$d" ] && [ "$(readlink "$HOME/$d")" = "$expected" ] && [ -d "$expected" ] ||
       fail "The $d folder does not point to the applied destination; backups were kept."
   done
+  # Verify every backup before deleting any; a mismatch preserves all copies.
+  for backup in "$MARK"/backup-*; do
+    [ -d "$backup" ] && [ ! -L "$backup" ] && valid_backup_name "$backup" || continue
+    folder="${backup##*/backup-}"
+    folder="${folder%%-*}"
+    backup_verified "$backup" "$TARGET/$folder" ||
+      fail "Backup ${backup##*/} differs from destination; no backups deleted."
+  done
   status running "Deleting confirmed internal backup copies"
   freed_kb=0
   removed=0
   for backup in "$MARK"/backup-*; do
     [ -d "$backup" ] && [ ! -L "$backup" ] && valid_backup_name "$backup" || continue
+    folder="${backup##*/backup-}"
+    folder="${folder%%-*}"
+    backup_verified "$backup" "$TARGET/$folder" ||
+      fail "Backup ${backup##*/} contains files absent or different at the destination; keeping all backups."
     size="$(du -sk "$backup" 2>/dev/null | awk 'NR==1 {print $1}')"
     [[ "$size" =~ ^[0-9]+$ ]] || size=0
     rm -rf -- "$backup" || fail "Could not delete an old backup: ${backup##*/}"
@@ -108,10 +172,10 @@ for d in "${DIRS[@]}"; do
     if [ -L "$src" ]; then
       # Was stored somewhere else before: copy it across, leave the old copy alone.
       [ -d "$current" ] || fail "Existing $d storage is unavailable: $current. Not replacing the link."
-      cp -r "$current/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
+      copy_verified "$current" "$dst" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
       rm -f "$src"
     elif [ -d "$src" ]; then
-      cp -r "$src/." "$dst/" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
+      copy_verified "$src" "$dst" || fail "Could not copy $d to $dst (a file name may not be allowed on that card)"
       backup="$MARK/backup-$d-$(date +%s)-$$"
       mv "$src" "$backup" || fail "Could not preserve original $d"
     fi
@@ -127,7 +191,7 @@ for d in "${DIRS[@]}"; do
     rm -rf "$tmp"
     mkdir -p "$tmp" || fail "Could not prepare internal storage for $d"
     [ -d "$current" ] || { rm -rf "$tmp"; fail "Previous $d storage is unavailable: $current. Files were not changed."; }
-    cp -r "$current/." "$tmp/" || { rm -rf "$tmp"; fail "Could not copy $d back to internal storage"; }
+    copy_verified "$current" "$tmp" || { rm -rf "$tmp"; fail "Could not copy $d back to internal storage"; }
     rm -f "$src"
     mv "$tmp" "$src" || fail "Could not restore $d to internal storage"
   fi
