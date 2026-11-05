@@ -80,7 +80,16 @@ relocate_deb() {
         if dpkg-deb -Znone --root-owner-group -b "$tree" "$tmp/new.deb" >/dev/null 2>"$tmp/err" ||
            dpkg-deb -Znone -b "$tree" "$tmp/new.deb" >/dev/null 2>>"$tmp/err"; then
             rm -rf "$tree"                      # free the unpacked copy before replacing the deb
-            mv -f "$tmp/new.deb" "$deb" 2>/dev/null || cat "$tmp/new.deb" > "$deb"
+            # Stage the replacement beside the original: a rename across filesystems is not atomic.
+            # Never fall back to truncating the original .deb after an unsuccessful move.
+            stage="$(dirname "$deb")/.$(basename "$deb").lxdesk-$$"
+            if ! cp "$tmp/new.deb" "$stage" || ! cmp -s "$tmp/new.deb" "$stage" || ! mv -f "$stage" "$deb"; then
+                rm -f "$stage"
+                log "REPLACE FAILED $(basename "$deb"): original package preserved"
+                echo "lxdesk: could not safely replace $(basename "$deb")" >&2
+                rm -rf "$tmp"
+                return 1
+            fi
             log "done $(basename "$deb")"
         else
             log "REPACK FAILED $(basename "$deb"): $(head -3 "$tmp/err" | tr '\n' ' ')"

@@ -64,6 +64,7 @@ public class DesktopLaunchActivity extends Activity {
     private static final int REQUEST_ALL_FILES_ACCESS = 4101;
     private static final int REQUEST_PICK_FOLDER = 4102;
     private static final int REQUEST_BATTERY_OPTIMIZATIONS = 4103;
+    private static final int REQUEST_OPTIONAL_PERMISSIONS = 4104;
     private static final String PREFS = "desktop_launcher";
     private static final String KEY_PERMISSIONS_ASKED = "permissions_asked";
     private static final String KEY_KEEP_ALIVE_ASKED = "keep_alive_asked";
@@ -118,7 +119,7 @@ public class DesktopLaunchActivity extends Activity {
 
         if (ACTION_STOP_DESKTOP.equals(getIntent().getAction())) {
             DesktopLauncher.stopDesktop(this);
-            Toast.makeText(this, "Desktop stopped", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Stopping desktop", Toast.LENGTH_SHORT).show();
             finish();
             return;
         }
@@ -136,7 +137,7 @@ public class DesktopLaunchActivity extends Activity {
             return;
         }
         List<String> missing = new ArrayList<>();
-        for (String permission : runtimePermissions())
+        for (String permission : startupPermissions())
             if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED)
                 missing.add(permission);
 
@@ -155,7 +156,7 @@ public class DesktopLaunchActivity extends Activity {
         // "Stop desktop" shortcut while this screen is still open (e.g. during setup).
         if (ACTION_STOP_DESKTOP.equals(intent.getAction())) {
             DesktopLauncher.stopDesktop(this);
-            Toast.makeText(this, "Desktop stopped", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Stopping desktop", Toast.LENGTH_SHORT).show();
         } else if (ACTION_DATA_FOLDER.equals(intent.getAction())) {
             showStorageSettings();
         }
@@ -185,6 +186,13 @@ public class DesktopLaunchActivity extends Activity {
     }
 
     // ---- Permissions ----
+
+    private static List<String> startupPermissions() {
+        List<String> permissions = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= 33)
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS);
+        return permissions;
+    }
 
     private static List<String> runtimePermissions() {
         List<String> permissions = new ArrayList<>();
@@ -429,6 +437,30 @@ public class DesktopLaunchActivity extends Activity {
         debugParams.topMargin = dp(24);
         content.addView(debug, debugParams);
 
+        Button doctor = button("Run desktop health check", false);
+        doctor.setOnClickListener(v -> {
+            if (!DesktopLauncher.runDoctor(this)) {
+                Toast.makeText(this, "Install the Linux environment first.", Toast.LENGTH_LONG).show();
+            } else {
+                doctor.setEnabled(false);
+                mHandler.postDelayed(() -> pollDoctor(doctor, 0), 700);
+            }
+        });
+        content.addView(doctor);
+
+        Button optional = button("Enable optional hardware permissions", false);
+        optional.setOnClickListener(v -> {
+            List<String> missing = new ArrayList<>();
+            for (String permission : runtimePermissions())
+                if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED)
+                    missing.add(permission);
+            if (missing.isEmpty())
+                Toast.makeText(this, "Optional permissions are already granted.", Toast.LENGTH_SHORT).show();
+            else
+                requestPermissions(missing.toArray(new String[0]), REQUEST_OPTIONAL_PERMISSIONS);
+        });
+        content.addView(optional);
+
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(COLOR_BACKGROUND);
         scroll.setFillViewport(true);
@@ -436,6 +468,29 @@ public class DesktopLaunchActivity extends Activity {
         setContentView(scroll);
 
         renderSteps(Step.PREPARE, false);
+    }
+
+    private void pollDoctor(Button button, int polls) {
+        if (isFinishing() || isDestroyed()) return;
+        String result = DesktopLauncher.readDoctorOutput();
+        if (result.contains("HEALTH_CHECK_DONE") || polls >= 60) {
+            button.setEnabled(true);
+            if (result.isEmpty()) result = "No diagnostic output was produced.";
+            final String report = result;
+            new AlertDialog.Builder(this)
+                .setTitle("LXDesk health check")
+                .setMessage(report)
+                .setPositiveButton("Copy", (dialog, which) -> {
+                    ClipboardManager clipboard =
+                        (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (clipboard != null)
+                        clipboard.setPrimaryClip(ClipData.newPlainText("LXDesk health report", report));
+                })
+                .setNegativeButton("Close", null)
+                .show();
+        } else {
+            mHandler.postDelayed(() -> pollDoctor(button, polls + 1), 500);
+        }
     }
 
     /** Shows which of the three steps is current, done, or still to come. */
@@ -614,25 +669,42 @@ public class DesktopLaunchActivity extends Activity {
             } else if (!DesktopLauncher.dataDirNeedsApplying()) {
                 finish();
             } else {
-                // A live XFCE session may write to these folders during the copy.
-                DesktopLauncher.stopDesktop(this);
+                // Start migration only after XFCE has confirmed termination.
+                if (!DesktopLauncher.stopDesktop(this)) {
+                    Toast.makeText(this, "Could not stop the desktop. Try again.", Toast.LENGTH_LONG).show();
+                    return;
+                }
                 mInstall.setVisibility(View.GONE);
-                mHeadline.setText("Stopping desktop and moving files");
-                mDetail.setText("Large folders can take a while. Your originals are kept.");
+                mHeadline.setText("Stopping desktop before moving files");
+                mDetail.setText("Waiting for desktop processes to exit. Your originals are kept.");
                 mBar.setVisibility(View.VISIBLE);
                 mBar.setIndeterminate(true);
-                mHandler.postDelayed(() -> {
-                    if (DesktopLauncher.applyDataDir(this)) {
-                        pollDataMove();
-                    } else {
-                        mBar.setVisibility(View.GONE);
-                        mHeadline.setText("Could not start file move");
-                        mInstall.setText("Try again");
-                        mInstall.setVisibility(View.VISIBLE);
-                    }
-                }, 900);
+                mHandler.postDelayed(() -> waitForDesktopStop(0), 300);
             }
         });
+    }
+
+    private void waitForDesktopStop(int polls) {
+        if (isFinishing() || isDestroyed()) return;
+        String state = DesktopLauncher.readStartState();
+        if (state.startsWith("stopped|")) {
+            if (DesktopLauncher.applyDataDir(this)) {
+                pollDataMove();
+                return;
+            }
+            state = "failed|Could not start file migration";
+        }
+        if (state.startsWith("failed|") || polls >= 100) {
+            mBar.setVisibility(View.GONE);
+            mHeadline.setTextColor(COLOR_ERROR);
+            mHeadline.setText("Could not safely stop the desktop");
+            mDetail.setText(state.startsWith("failed|") ? state.substring(7)
+                : "Timed out waiting for desktop processes. No files were moved.");
+            mInstall.setText("Try again");
+            mInstall.setVisibility(View.VISIBLE);
+        } else {
+            mHandler.postDelayed(() -> waitForDesktopStop(polls + 1), 300);
+        }
     }
 
     private void pollBackupCleanup(int polls) {
@@ -680,7 +752,7 @@ public class DesktopLaunchActivity extends Activity {
         try {
             return new StatFs(getFilesDir().getPath()).getAvailableBytes() / 1e9;
         } catch (Exception e) {
-            return Double.MAX_VALUE; // unknown: do not block
+            return 0; // unknown: fail closed rather than risk filling device storage
         }
     }
 
@@ -688,7 +760,8 @@ public class DesktopLaunchActivity extends Activity {
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm == null || cm.getActiveNetwork() == null) return false;
         NetworkCapabilities caps = cm.getNetworkCapabilities(cm.getActiveNetwork());
-        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
     }
 
     private void runSetup() {

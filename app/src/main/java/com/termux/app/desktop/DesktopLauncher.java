@@ -28,8 +28,7 @@ public class DesktopLauncher {
 
     private static final String LOG_TAG = "DesktopLauncher";
     private static final String ASSET_DIR = "desktop/";
-    private static String sWrittenFromApk;
-    private static final String[] SCRIPTS = {"lxdesk-common.sh", "termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-purge-backups", "linux-desktop-stop", "linux-desktop-verify"};
+    private static final String[] SCRIPTS = {"lxdesk-common.sh", "termux-x11", "linux-desktop", "linux-desktop-setup", "linux-desktop-extras", "linux-desktop-data", "linux-desktop-purge-backups", "linux-desktop-stop", "linux-desktop-verify", "linux-desktop-doctor"};
 
     private static final File STATE_DIR = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".config/linux-desktop");
     private static final File INSTALLED_MARKER = new File(STATE_DIR, "installed-v1");
@@ -162,8 +161,10 @@ public class DesktopLauncher {
     }
 
     /** Asks the running Termux to stop the X server, XFCE and audio. */
-    public static void stopDesktop(Context context) {
-        if (isBootstrapInstalled() && writeScripts(context)) runInBackground(context, "linux-desktop-stop");
+    public static boolean stopDesktop(Context context) {
+        new File(STATE_DIR, "start-state").delete();
+        return isBootstrapInstalled() && writeScripts(context)
+            && runInBackground(context, "linux-desktop-stop");
     }
 
     /**
@@ -341,11 +342,15 @@ public class DesktopLauncher {
      * pickers that are not plain storage (cloud drives and so on).
      */
     public static String pathFromTreeUri(Uri uri) {
-        if (!"com.android.externalstorage.documents".equals(uri.getAuthority())) return null;
+        if (uri == null || !"com.android.externalstorage.documents".equals(uri.getAuthority())) return null;
         String id = android.provider.DocumentsContract.getTreeDocumentId(uri);
+        if (id == null) return null;
         int colon = id.indexOf(':');
         if (colon < 0) return null;
         String volume = id.substring(0, colon), relative = id.substring(colon + 1);
+        if (!"primary".equals(volume) && !volume.matches("[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}")) return null;
+        if (relative.startsWith("/") || relative.contains("\\") || relative.equals("..")
+                || relative.startsWith("../") || relative.contains("/../") || relative.endsWith("/..")) return null;
         String root = "primary".equals(volume) ? "/storage/emulated/0" : "/storage/" + volume;
         return relative.isEmpty() ? root + "/LinuxDesktop" : root + "/" + relative;
     }
@@ -416,7 +421,12 @@ public class DesktopLauncher {
             out.append("failed package logs: ").append(names).append('\n');
             appendTail(out, failed[0].getName(), failed[0], 40);
         }
-        return out.toString();
+        String report = out.toString();
+        // Diagnostics are copied to the clipboard, so redact common secrets and cap output.
+        report = report.replaceAll("(?i)(bearer\\s+)\\S+", "$1[REDACTED]");
+        report = report.replaceAll("(?i)((?:password|api[_-]?key|access[_-]?token|secret)\\s*[:=]\\s*)\\S+", "$1[REDACTED]");
+        report = report.replace(TermuxConstants.TERMUX_HOME_DIR_PATH, "~");
+        return report.length() <= 40000 ? report : report.substring(0, 40000) + "\n[truncated]";
     }
 
     private static void appendTail(StringBuilder out, String title, File file, int lines) {
@@ -479,6 +489,26 @@ public class DesktopLauncher {
         }
     }
 
+    /** Starts a read-only health report. */
+    public static boolean runDoctor(Context context) {
+        new File(STATE_DIR, "doctor.log").delete();
+        return isBootstrapInstalled() && writeScripts(context) &&
+            runInBackground(context, "linux-desktop-doctor");
+    }
+
+    public static String readDoctorOutput() {
+        File file = new File(STATE_DIR, "doctor.log");
+        StringBuilder result = new StringBuilder();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null && result.length() < 8000)
+                result.append(line).append('\n');
+        } catch (IOException ignored) {
+            return "";
+        }
+        return result.toString();
+    }
+
     private static String readFirstLine(File file) {
         try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(file))) {
             String line = reader.readLine();
@@ -518,17 +548,7 @@ public class DesktopLauncher {
 
     private static synchronized boolean writeScripts(Context context) {
         String apkPath = context.getApplicationInfo().sourceDir;
-        // Revalidate installed files if a bootstrap reset removed the bin directory.
-        if (apkPath.equals(sWrittenFromApk)) {
-            boolean stillInstalled = true;
-            for (String name : SCRIPTS) {
-                if (!new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH, name).canExecute()) {
-                    stillInstalled = false;
-                    break;
-                }
-            }
-            if (stillInstalled) return true;
-        }
+        // Always compare installed scripts with the APK; same path is not proof of integrity.
         for (String name : SCRIPTS) {
             try (InputStream in = context.getAssets().open(ASSET_DIR + name)) {
                 String body = PathRelocator.relocate(new String(readAll(in), StandardCharsets.UTF_8))
@@ -551,17 +571,23 @@ public class DesktopLauncher {
                         continue;
                     }
                 }
-                if (out.exists() && !out.delete()) throw new IOException("Cannot replace " + out);
-                com.termux.shared.errors.Error error = FileUtils.writeTextToFile(name, out.getAbsolutePath(),
-                    StandardCharsets.UTF_8, body, false);
-                if (error != null) throw new IOException(error.getMinimalErrorString());
-                if (!out.setExecutable(true, false)) throw new IOException("Cannot chmod " + out);
+                // Write alongside the existing script, then rename over it atomically.
+                // A failed write must never leave an installed executable half-written.
+                File staged = new File(out.getParentFile(), "." + name + ".tmp-" + android.os.Process.myPid());
+                try {
+                    com.termux.shared.errors.Error error = FileUtils.writeTextToFile(name, staged.getAbsolutePath(),
+                        StandardCharsets.UTF_8, body, false);
+                    if (error != null) throw new IOException(error.getMinimalErrorString());
+                    if (!staged.setExecutable(true, false)) throw new IOException("Cannot chmod " + staged);
+                    if (!staged.renameTo(out)) throw new IOException("Cannot safely replace " + out);
+                } finally {
+                    staged.delete();
+                }
             } catch (IOException e) {
                 Logger.logStackTraceWithMessage(LOG_TAG, "Failed to install " + name, e);
                 return false;
             }
         }
-        sWrittenFromApk = apkPath;
         return true;
     }
 

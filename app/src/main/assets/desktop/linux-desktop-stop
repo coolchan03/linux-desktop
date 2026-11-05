@@ -1,5 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 MARK="$HOME/.config/linux-desktop"
+STATUS="$MARK/start-state"
+echo "stopping|Stopping desktop processes" > "$STATUS"
 X11_SOCKET="${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
 
 # Stop only the desktop/session processes owned by this app's Termux environment.
@@ -11,5 +13,14 @@ pkill -x xfwm4 2>/dev/null || true
 pulseaudio --kill 2>/dev/null || true
 pkill -x dbus-daemon 2>/dev/null || true
 
+for ((attempt=0; attempt<50; attempt++)); do
+  if ! pgrep -x xfce4-session >/dev/null 2>&1 && ! pgrep -x xfwm4 >/dev/null 2>&1 && ! pgrep -x xfce4-panel >/dev/null 2>&1; then break; fi
+  sleep 0.2
+done
+if pgrep -x xfce4-session >/dev/null 2>&1 || pgrep -x xfwm4 >/dev/null 2>&1 || pgrep -x xfce4-panel >/dev/null 2>&1; then
+  echo "failed|Desktop processes did not exit" > "$STATUS"
+  exit 1
+fi
 rm -f "$X11_SOCKET" "$MARK/desktop.pid"
+echo "stopped|Desktop processes stopped" > "$STATUS"
 echo "Desktop stopped."
