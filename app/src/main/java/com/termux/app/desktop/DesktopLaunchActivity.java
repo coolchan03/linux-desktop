@@ -118,7 +118,7 @@ public class DesktopLaunchActivity extends Activity {
 
         if (ACTION_STOP_DESKTOP.equals(getIntent().getAction())) {
             DesktopLauncher.stopDesktop(this);
-            Toast.makeText(this, "Desktop stopped", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Stopping desktop", Toast.LENGTH_SHORT).show();
             finish();
             return;
         }
@@ -155,7 +155,7 @@ public class DesktopLaunchActivity extends Activity {
         // "Stop desktop" shortcut while this screen is still open (e.g. during setup).
         if (ACTION_STOP_DESKTOP.equals(intent.getAction())) {
             DesktopLauncher.stopDesktop(this);
-            Toast.makeText(this, "Desktop stopped", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Stopping desktop", Toast.LENGTH_SHORT).show();
         } else if (ACTION_DATA_FOLDER.equals(intent.getAction())) {
             showStorageSettings();
         }
@@ -608,25 +608,42 @@ public class DesktopLaunchActivity extends Activity {
             } else if (!DesktopLauncher.dataDirNeedsApplying()) {
                 finish();
             } else {
-                // A live XFCE session may write to these folders during the copy.
-                DesktopLauncher.stopDesktop(this);
+                // Start migration only after XFCE has confirmed termination.
+                if (!DesktopLauncher.stopDesktop(this)) {
+                    Toast.makeText(this, "Could not stop the desktop. Try again.", Toast.LENGTH_LONG).show();
+                    return;
+                }
                 mInstall.setVisibility(View.GONE);
-                mHeadline.setText("Stopping desktop and moving files");
-                mDetail.setText("Large folders can take a while. Your originals are kept.");
+                mHeadline.setText("Stopping desktop before moving files");
+                mDetail.setText("Waiting for desktop processes to exit. Your originals are kept.");
                 mBar.setVisibility(View.VISIBLE);
                 mBar.setIndeterminate(true);
-                mHandler.postDelayed(() -> {
-                    if (DesktopLauncher.applyDataDir(this)) {
-                        pollDataMove();
-                    } else {
-                        mBar.setVisibility(View.GONE);
-                        mHeadline.setText("Could not start file move");
-                        mInstall.setText("Try again");
-                        mInstall.setVisibility(View.VISIBLE);
-                    }
-                }, 900);
+                mHandler.postDelayed(() -> waitForDesktopStop(0), 300);
             }
         });
+    }
+
+    private void waitForDesktopStop(int polls) {
+        if (isFinishing() || isDestroyed()) return;
+        String state = DesktopLauncher.readStartState();
+        if (state.startsWith("stopped|")) {
+            if (DesktopLauncher.applyDataDir(this)) {
+                pollDataMove();
+                return;
+            }
+            state = "failed|Could not start file migration";
+        }
+        if (state.startsWith("failed|") || polls >= 100) {
+            mBar.setVisibility(View.GONE);
+            mHeadline.setTextColor(COLOR_ERROR);
+            mHeadline.setText("Could not safely stop the desktop");
+            mDetail.setText(state.startsWith("failed|") ? state.substring(7)
+                : "Timed out waiting for desktop processes. No files were moved.");
+            mInstall.setText("Try again");
+            mInstall.setVisibility(View.VISIBLE);
+        } else {
+            mHandler.postDelayed(() -> waitForDesktopStop(polls + 1), 300);
+        }
     }
 
     private void pollBackupCleanup(int polls) {

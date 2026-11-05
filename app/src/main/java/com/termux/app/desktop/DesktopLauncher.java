@@ -131,8 +131,10 @@ public class DesktopLauncher {
     }
 
     /** Asks the running Termux to stop the X server, XFCE and audio. */
-    public static void stopDesktop(Context context) {
-        if (isBootstrapInstalled() && writeScripts(context)) runInBackground(context, "linux-desktop-stop");
+    public static boolean stopDesktop(Context context) {
+        new File(STATE_DIR, "start-state").delete();
+        return isBootstrapInstalled() && writeScripts(context)
+            && runInBackground(context, "linux-desktop-stop");
     }
 
     /**
@@ -310,11 +312,15 @@ public class DesktopLauncher {
      * pickers that are not plain storage (cloud drives and so on).
      */
     public static String pathFromTreeUri(Uri uri) {
-        if (!"com.android.externalstorage.documents".equals(uri.getAuthority())) return null;
+        if (uri == null || !"com.android.externalstorage.documents".equals(uri.getAuthority())) return null;
         String id = android.provider.DocumentsContract.getTreeDocumentId(uri);
+        if (id == null) return null;
         int colon = id.indexOf(':');
         if (colon < 0) return null;
         String volume = id.substring(0, colon), relative = id.substring(colon + 1);
+        if (!"primary".equals(volume) && !volume.matches("[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}")) return null;
+        if (relative.startsWith("/") || relative.contains("\\") || relative.equals("..")
+                || relative.startsWith("../") || relative.contains("/../") || relative.endsWith("/..")) return null;
         String root = "primary".equals(volume) ? "/storage/emulated/0" : "/storage/" + volume;
         return relative.isEmpty() ? root + "/LinuxDesktop" : root + "/" + relative;
     }
@@ -382,7 +388,12 @@ public class DesktopLauncher {
             out.append("failed package logs: ").append(names).append('\n');
             appendTail(out, failed[0].getName(), failed[0], 40);
         }
-        return out.toString();
+        String report = out.toString();
+        // Diagnostics are copied to the clipboard, so redact common secrets and cap output.
+        report = report.replaceAll("(?i)(bearer\\s+)\\S+", "$1[REDACTED]");
+        report = report.replaceAll("(?i)((?:password|api[_-]?key|access[_-]?token|secret)\\s*[:=]\\s*)\\S+", "$1[REDACTED]");
+        report = report.replace(TermuxConstants.TERMUX_HOME_DIR_PATH, "~");
+        return report.length() <= 40000 ? report : report.substring(0, 40000) + "\n[truncated]";
     }
 
     private static void appendTail(StringBuilder out, String title, File file, int lines) {
