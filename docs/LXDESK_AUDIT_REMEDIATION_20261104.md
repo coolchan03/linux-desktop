@@ -10,13 +10,13 @@ No C: drive operations and no changes to unrelated Android projects.
 - [x] Limit embedded X11 broadcast receivers to the application; verify app_process startup on a device.
 - [x] Enable native stack-protector compiler protection.
 - [ ] Replace raw SAF tree URI assumptions with persisted URI permissions or a supported app-owned directory.
-- [ ] Add migration concurrency lock and test interruption/rollback on Android.
+- [x] Add atomic migration lock and Linux stale-lock regression checks; interruption/rollback still needs Android verification.
 - [ ] Validate X11 `-ac` access-control requirements, then remove or constrain it safely.
 
 ## Phase 2 — startup and installation
 - [x] Treat unknown internal free space as unsafe, not unlimited.
 - [x] Require a validated network for initial install.
-- [ ] Replace the 900ms wait for desktop termination with confirmed process exit.
+- [x] Replace the 900ms shutdown delay with process-stop confirmation and timeout.
 - [ ] Add atomic setup locks and recovery state machine for interrupted installs.
 - [ ] Validate cold install, upgrade, stop, relaunch and software GPU fallback on device.
 
@@ -29,12 +29,12 @@ No C: drive operations and no changes to unrelated Android projects.
 ## Phase 4 — tests, release, documentation
 - [x] Add regression test for migration into a conflicting destination.
 - [ ] Run Linux shell tests, Android unit tests, release build and on-device smoke tests.
-- [ ] Document signing, verified upgrade, restore and Android storage caveats.
+- [x] Add user guide for storage, diagnostics, permissions and release validation; signed upgrade still needs device testing.
 - [ ] Expand dependency update checks and supply-chain review.
 
 ## Phase 5 — features
 - [x] Add `linux-desktop-doctor` read-only diagnostic command.
-- [ ] Surface doctor results in a graphical Repair Center.
+- [x] Show read-only doctor results and copy support in the launcher.
 - [ ] Add phone/tablet/external-display presets and touch scaling controls.
 - [ ] Add snapshot/restore UI and safe package management.
 

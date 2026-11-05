@@ -12,23 +12,28 @@ mkdir -p "$MARK"
 TARGET="$(cat "$MARK/datadir" 2>/dev/null)"
 DIRS=(Documents Downloads Music Pictures Projects Videos)
 status() { echo "$1|$2" > "$MARK/data-state"; }
-PID_FILE="$MARK/data.pid"
-
-# Do not let two storage migrations race with each other.
-if [ -f "$PID_FILE" ]; then
-  old_pid="$(cat "$PID_FILE" 2>/dev/null)"
-  if [ -n "$old_pid" ] && [ -r "/proc/$old_pid/cmdline" ] && tr '\0' ' ' < "/proc/$old_pid/cmdline" | grep -q 'linux-desktop-data'; then
-    if [ "${1:-}" = "--purge-backups" ]; then
-      status failed "Wait for the current storage move or backup cleanup to finish."
-      exit 1
-    fi
-    status running "A file move is already in progress"
-    exit 0
+# mkdir is atomic on the app private filesystem; a pid file alone is not.
+LOCK_DIR="$MARK/data.lock"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  old_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
+  if [[ "$old_pid" =~ ^[0-9]+$ ]] && [ -r "/proc/$old_pid/cmdline" ] &&
+    tr '\0' ' ' < "/proc/$old_pid/cmdline" | grep -q 'linux-desktop-data'; then
+    status failed "Another storage operation is running."
+    exit 1
   fi
-  rm -f "$PID_FILE"
+  lock_mtime="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || date +%s)"
+  [[ "$lock_mtime" =~ ^[0-9]+$ ]] || lock_mtime="$(date +%s)"
+  if [ $(( $(date +%s) - lock_mtime )) -lt 60 ]; then
+    status failed "A storage operation may be starting. Try again shortly."
+    exit 1
+  fi
+  stale="$MARK/data.stale.$$"
+  mv "$LOCK_DIR" "$stale" 2>/dev/null || { status failed "Could not recover stale migration lock"; exit 1; }
+  rm -rf -- "$stale"
+  mkdir "$LOCK_DIR" 2>/dev/null || { status failed "Another storage operation started"; exit 1; }
 fi
-echo $$ > "$PID_FILE"
-trap 'rm -f "$PID_FILE"' EXIT
+echo $$ > "$LOCK_DIR/pid"
+trap 'rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
 fail() {
   echo "$*" >&2
