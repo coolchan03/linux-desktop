@@ -2,6 +2,8 @@
 # LXDesk read-only repair diagnostics. Never changes installed files or user data.
 set -u
 mark="$HOME/.config/linux-desktop"
+mkdir -p "$mark"
+exec > >(tee "$mark/doctor.log") 2>&1
 check() { if "$@" >/dev/null 2>&1; then echo "PASS $*"; else echo "FAIL $*"; fi; }
 printf 'LXDesk desktop health check\n'
 printf 'Android architecture: %s\n' "$(getprop ro.product.cpu.abi 2>/dev/null || echo unknown)"
@@ -21,3 +23,4 @@ for state in state start-state data-state extras-state; do
   if [ -f "$mark/$state" ]; then printf '%s: ' "$state"; head -n 1 "$mark/$state"; fi
 done
 printf 'No changes were made. Review ~/.config/linux-desktop/*.log for details.\n'
+printf 'HEALTH_CHECK_DONE\n'

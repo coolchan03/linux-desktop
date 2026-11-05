@@ -2,6 +2,8 @@
 
 A full Linux desktop (XFCE) on your Android phone, in **one app**. Tap one icon; no separate terminal app and display app.
 
+See the LXDesk User Guide in docs/LXDESK_USER_GUIDE_20261105.md for safe migration and troubleshooting.
+
 It combines three projects:
 
 | Project | What it provides here |
@@ -24,7 +26,7 @@ Requires **Android 7 or newer**. Allow "install from unknown sources" when your 
 
 ## First run
 
-1. Open **LXDesk** and answer the optional permission prompts for camera, microphone, location, notifications, Bluetooth and media. **All-files access is only requested if you choose an SD card or another external folder for your files.**
+1. Open **LXDesk**. Android 13+ requests notification permission during normal startup. Other hardware permissions are opt-in. All-files access is only requested when a storage folder requires it.
 2. A loading screen walks through three steps: **prepare the Linux system**, **install the desktop**, **start the desktop**, and always says what it is doing right now.
 3. Choose what to install:
    - **Minimal**: the desktop only

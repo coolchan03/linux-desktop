@@ -456,6 +456,26 @@ public class DesktopLauncher {
         }
     }
 
+    /** Starts a read-only health report. */
+    public static boolean runDoctor(Context context) {
+        new File(STATE_DIR, "doctor.log").delete();
+        return isBootstrapInstalled() && writeScripts(context) &&
+            runInBackground(context, "linux-desktop-doctor");
+    }
+
+    public static String readDoctorOutput() {
+        File file = new File(STATE_DIR, "doctor.log");
+        StringBuilder result = new StringBuilder();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null && result.length() < 8000)
+                result.append(line).append('\n');
+        } catch (IOException ignored) {
+            return "";
+        }
+        return result.toString();
+    }
+
     private static String readFirstLine(File file) {
         try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(file))) {
             String line = reader.readLine();
