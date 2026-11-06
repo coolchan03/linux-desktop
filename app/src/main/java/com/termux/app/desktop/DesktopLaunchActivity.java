@@ -3,6 +3,10 @@ package com.termux.app.desktop;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -42,6 +46,7 @@ import com.termux.shared.android.PermissionUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Consumer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -59,6 +64,11 @@ public class DesktopLaunchActivity extends Activity {
     public static final String ACTION_STOP_DESKTOP = "com.termux.app.desktop.STOP_DESKTOP";
     /** Sent by the "Storage location" shortcut. */
     public static final String ACTION_DATA_FOLDER = "com.termux.app.desktop.DATA_FOLDER";
+    /** Sent by the "Restart desktop" shortcut, e.g. when XFCE hangs. */
+    public static final String ACTION_RESTART_DESKTOP = "com.termux.app.desktop.RESTART_DESKTOP";
+
+    private static final String CHANNEL_READY = "desktop_ready";
+    private static final int NOTIFICATION_READY = 4200;
 
     private static final int REQUEST_RUNTIME_PERMISSIONS = 4100;
     private static final int REQUEST_ALL_FILES_ACCESS = 4101;
@@ -130,6 +140,10 @@ public class DesktopLaunchActivity extends Activity {
             showStorageSettings();
             return;
         }
+        if (ACTION_RESTART_DESKTOP.equals(getIntent().getAction())) {
+            restartDesktop();
+            return;
+        }
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         if (prefs.getBoolean(KEY_PERMISSIONS_ASKED, false)) {
@@ -159,6 +173,10 @@ public class DesktopLaunchActivity extends Activity {
             Toast.makeText(this, "Stopping desktop", Toast.LENGTH_SHORT).show();
         } else if (ACTION_DATA_FOLDER.equals(intent.getAction())) {
             showStorageSettings();
+        } else if (ACTION_RESTART_DESKTOP.equals(intent.getAction())) {
+            // Start over from a clean screen state.
+            setIntent(intent);
+            recreate();
         }
     }
 
@@ -166,6 +184,8 @@ public class DesktopLaunchActivity extends Activity {
     protected void onResume() {
         super.onResume();
         mResumed = true;
+        NotificationManager notifications = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (notifications != null) notifications.cancel(NOTIFICATION_READY);
         // Setup finished while the app was in the background: the display can only be opened from the foreground.
         if (mSetupFinishedInBackground) {
             mSetupFinishedInBackground = false;
@@ -679,32 +699,46 @@ public class DesktopLaunchActivity extends Activity {
                 mDetail.setText("Waiting for desktop processes to exit. Your originals are kept.");
                 mBar.setVisibility(View.VISIBLE);
                 mBar.setIndeterminate(true);
-                mHandler.postDelayed(() -> waitForDesktopStop(0), 300);
+                mHandler.postDelayed(() -> waitForDesktopStop(0, () -> {
+                    if (DesktopLauncher.applyDataDir(this)) pollDataMove();
+                    else showStopProblem("Could not start file migration");
+                }, this::showStopProblem), 300);
             }
         });
     }
 
-    private void waitForDesktopStop(int polls) {
+    private void showStopProblem(String reason) {
+        mBar.setVisibility(View.GONE);
+        mHeadline.setTextColor(COLOR_ERROR);
+        mHeadline.setText("Could not safely stop the desktop");
+        mDetail.setText(reason + "\nNo files were moved.");
+        mInstall.setText("Try again");
+        mInstall.setVisibility(View.VISIBLE);
+    }
+
+    /** Waits for linux-desktop-stop to report its result, then runs onStopped or onFailed with the reason. */
+    private void waitForDesktopStop(int polls, Runnable onStopped, Consumer<String> onFailed) {
         if (isFinishing() || isDestroyed()) return;
         String state = DesktopLauncher.readStartState();
-        if (state.startsWith("stopped|")) {
-            if (DesktopLauncher.applyDataDir(this)) {
-                pollDataMove();
-                return;
-            }
-            state = "failed|Could not start file migration";
+        if (state.startsWith("stopped|")) onStopped.run();
+        else if (state.startsWith("failed|")) onFailed.accept(state.substring(7));
+        else if (polls >= 100) onFailed.accept("Timed out waiting for desktop processes to exit.");
+        else mHandler.postDelayed(() -> waitForDesktopStop(polls + 1, onStopped, onFailed), 300);
+    }
+
+    /** "Restart desktop" shortcut: stop XFCE and the X server, then start them again and open the display. */
+    private void restartDesktop() {
+        if (!DesktopLauncher.isInstalled()) {
+            begin(); // nothing to restart yet: the normal first-run flow
+            return;
         }
-        if (state.startsWith("failed|") || polls >= 100) {
-            mBar.setVisibility(View.GONE);
-            mHeadline.setTextColor(COLOR_ERROR);
-            mHeadline.setText("Could not safely stop the desktop");
-            mDetail.setText(state.startsWith("failed|") ? state.substring(7)
-                : "Timed out waiting for desktop processes. No files were moved.");
-            mInstall.setText("Try again");
-            mInstall.setVisibility(View.VISIBLE);
-        } else {
-            mHandler.postDelayed(() -> waitForDesktopStop(polls + 1), 300);
+        setProgress(Step.START, "Restarting the desktop", "Stopping the running desktop first.", -1);
+        if (!DesktopLauncher.stopDesktop(this)) {
+            showError(Step.START, "Could not stop the desktop", "Try again.", this::restartDesktop);
+            return;
         }
+        mHandler.postDelayed(() -> waitForDesktopStop(0, this::begin,
+            reason -> showError(Step.START, "Could not stop the desktop", reason, this::restartDesktop)), 300);
     }
 
     private void pollBackupCleanup(int polls) {
@@ -795,8 +829,12 @@ public class DesktopLaunchActivity extends Activity {
     private void pollSetup() {
         if (isFinishing() || isDestroyed() || mFinished) return;
         if (DesktopLauncher.isInstalled()) {
-            if (mResumed) afterSetup();
-            else mSetupFinishedInBackground = true;
+            if (mResumed) {
+                afterSetup();
+            } else {
+                mSetupFinishedInBackground = true;
+                notifyDesktopReady();
+            }
             return;
         }
         DesktopLauncher.Progress p = DesktopLauncher.readProgress();
@@ -819,6 +857,30 @@ public class DesktopLaunchActivity extends Activity {
         if (!p.message.isEmpty())
             setProgress(Step.INSTALL, "Installing the desktop", p.message + "\nYou can leave the app; installation continues.", p.percent);
         mHandler.postDelayed(this::pollSetup, 700);
+    }
+
+    /** Setup can take minutes; if the user switched apps, tell them when the desktop can be opened. */
+    @SuppressWarnings("deprecation")
+    private void notifyDesktopReady() {
+        NotificationManager notifications = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (notifications == null) return;
+        Notification.Builder builder;
+        if (Build.VERSION.SDK_INT >= 26) {
+            notifications.createNotificationChannel(new NotificationChannel(CHANNEL_READY,
+                "Desktop ready", NotificationManager.IMPORTANCE_DEFAULT));
+            builder = new Notification.Builder(this, CHANNEL_READY);
+        } else {
+            builder = new Notification.Builder(this);
+        }
+        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, DesktopLaunchActivity.class),
+            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        notifications.notify(NOTIFICATION_READY, builder
+            .setSmallIcon(R.drawable.ic_service_notification)
+            .setContentTitle("Your Linux desktop is ready")
+            .setContentText("Tap to open it.")
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build());
     }
 
     private void afterSetup() {

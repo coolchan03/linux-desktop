@@ -14,10 +14,7 @@ for exe in "${COMMANDS[@]}"; do
   command -v "$exe" >/dev/null 2>&1 || missing+=("command:$exe")
 done
 if [ "${#missing[@]}" -gt 0 ]; then
-  printf 'Desktop verification failed. Missing components:
-' > "$MARK/verify.log"
-  printf '%s
-' "${missing[@]}" >> "$MARK/verify.log"
+  { echo "Desktop verification failed. Missing components:"; printf '%s\n' "${missing[@]}"; } > "$MARK/verify.log"
   exit 1
 fi
 rm -f "$MARK/verify.log"

@@ -75,6 +75,17 @@ fi
 test -f "$newbackup/preserve.txt"
 printf '%s\n' "$target" > "$mark/datadir"
 
+# Refuse, deleting nothing, if any backup has files that are missing or different at the destination.
+goodbackup="$mark/backup-Documents-50-60"
+mkdir -p "$goodbackup"
+cp "$target/Documents/sample.txt" "$goodbackup/"
+if bash "$script" --purge-backups; then
+  echo 'ERROR: cleanup deleted backups that differ from the destination' >&2
+  exit 1
+fi
+test -f "$newbackup/preserve.txt"
+test -f "$goodbackup/sample.txt"
+
 # Refuse if a live home link no longer points to the applied destination.
 rm -f "$HOME/Documents"
 mkdir -p "$HOME/Documents"

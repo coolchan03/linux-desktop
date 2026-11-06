@@ -41,7 +41,8 @@ After that, one tap goes straight to the desktop.
 - **GPU acceleration** with Turnip/Zink (Adreno GPUs) or a software Vulkan fallback, using Termux's native packages.
 - **Runs next to the official Termux.** This app is `com.lxdesk`, so it does not replace or conflict with `com.termux`.
 - **Own storage location** for your files: internal storage, an SD card, or any folder (see [Where your files are stored](#where-your-files-are-stored)).
-- **Long-press the icon** for: *New session* (plain terminal), *Storage location*, *Stop desktop*, *Settings*.
+- **Long-press the icon** for: *New session* (plain terminal), *Storage location*, *Restart desktop* (if XFCE hangs), *Stop desktop*, *Settings*.
+- **"Desktop ready" notification** when setup finishes while you are in another app.
 - **Copy debug info** button on the loading screen: one tap copies device info, setup state and the relevant logs.
 - **Phone-friendly defaults**: scaled display resolution, fullscreen, trackpad touch mode. Change them in the display settings.
 - **Keeps running**: asks for the battery-optimization exemption and explains Android's child-process limit (Android 12+).
@@ -70,7 +71,7 @@ Not moved: your home folder's settings and the Desktop folder, which need real L
 - **Downloaded packages** (Firefox, VS Code, Wine, anything from `pkg install`) take longer because each one is rewritten before installing. Unpacking and repacking can use approximately five times a package's size in temporary internal storage. The bundled desktop packages are already rewritten.
 - **Only 64-bit ARM carries the desktop** by default, so the universal APK does not quadruple in size; other processors download it. See [Building from source](#building-from-source) to change this.
 - **Android 12+** may stop background programs; see the in-app hint about Developer options. On Android 12–13, Wireless debugging/ADB may be needed to change phantom process limits; use the in-app **Copy adb commands** button.
-- **GPU fallback:** if accelerated XFCE fails, LXDesk creates `~/.config/linux-desktop/software-gl` to use software rendering on later launches. Delete that file to try GPU acceleration again.
+- **GPU fallback:** if accelerated XFCE fails, LXDesk creates `~/.config/linux-desktop/software-gl` to use software rendering on later launches. It tries GPU acceleration again after each app update; delete that file to retry sooner.
 - Full only installs optional security/network packages that the device's current repositories actually provide; unavailable packages are skipped and logged.
 - Requires Android 7+; the older "apt-android-5" bootstrap variant is not built.
 

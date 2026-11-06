@@ -4,6 +4,12 @@ STATUS="$MARK/start-state"
 echo "stopping|Stopping desktop processes" > "$STATUS"
 X11_SOCKET="${TMPDIR:-$PREFIX/tmp}/.X11-unix/X0"
 
+# End the launcher script first so it cannot report the session it was watching as a failure.
+launcher="$(cat "$MARK/desktop.pid" 2>/dev/null)"
+if [[ "$launcher" =~ ^[0-9]+$ ]] && tr '\0' ' ' < "/proc/$launcher/cmdline" 2>/dev/null | grep -qE '/bin/linux-desktop( |$)'; then
+  kill "$launcher" 2>/dev/null
+fi
+
 # Stop only the desktop/session processes owned by this app's Termux environment.
 pkill -x termux-x11 2>/dev/null || pkill -f '^termux-x11 ' 2>/dev/null || true
 pkill -x xfce4-session 2>/dev/null || true
@@ -13,11 +19,12 @@ pkill -x xfwm4 2>/dev/null || true
 pulseaudio --kill 2>/dev/null || true
 pkill -x dbus-daemon 2>/dev/null || true
 
+desktop_running() { pgrep -x xfce4-session || pgrep -x xfwm4 || pgrep -x xfce4-panel; } >/dev/null 2>&1
 for ((attempt=0; attempt<50; attempt++)); do
-  if ! pgrep -x xfce4-session >/dev/null 2>&1 && ! pgrep -x xfwm4 >/dev/null 2>&1 && ! pgrep -x xfce4-panel >/dev/null 2>&1; then break; fi
+  desktop_running || break
   sleep 0.2
 done
-if pgrep -x xfce4-session >/dev/null 2>&1 || pgrep -x xfwm4 >/dev/null 2>&1 || pgrep -x xfce4-panel >/dev/null 2>&1; then
+if desktop_running; then
   echo "failed|Desktop processes did not exit" > "$STATUS"
   exit 1
 fi

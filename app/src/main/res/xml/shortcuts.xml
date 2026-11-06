@@ -36,6 +36,18 @@
     </shortcut>
 
     <shortcut
+        android:shortcutId="restart_desktop"
+        android:enabled="true"
+        android:icon="@drawable/ic_new_session"
+        android:shortcutShortLabel="@string/action_restart_desktop"
+        tools:targetApi="n_mr1">
+        <intent
+            android:action="com.termux.app.desktop.RESTART_DESKTOP"
+            android:targetPackage="com.lxdesk"
+            android:targetClass="com.termux.app.desktop.DesktopLaunchActivity" />
+    </shortcut>
+
+    <shortcut
         android:shortcutId="stop_desktop"
         android:enabled="true"
         android:icon="@drawable/ic_new_session"

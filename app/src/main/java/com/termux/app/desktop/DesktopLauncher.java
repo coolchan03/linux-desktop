@@ -469,7 +469,27 @@ public class DesktopLauncher {
     /** Runs {@code linux-desktop} (X server + XFCE) in a background shell. */
     public static boolean startDesktop(Context context) {
         new File(STATE_DIR, "start-state").delete();
+        retryGpuAfterUpdate(context);
         return writeScripts(context) && runInBackground(context, "linux-desktop");
+    }
+
+    /**
+     * linux-desktop switches to software rendering for good after a failed GPU start. A new app version can
+     * fix that, so give the GPU one more chance after each update; a new failure falls back again.
+     */
+    @SuppressWarnings("deprecation") // versionCode: getLongVersionCode() needs API 28
+    private static void retryGpuAfterUpdate(Context context) {
+        File softwareGl = new File(STATE_DIR, "software-gl");
+        File versionFile = new File(STATE_DIR, "app-version");
+        String version;
+        try {
+            version = String.valueOf(context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionCode);
+        } catch (Exception e) {
+            return;
+        }
+        if (version.equals(readFirstLine(versionFile).trim())) return;
+        if (softwareGl.delete()) Logger.logInfo(LOG_TAG, "App updated: trying GPU acceleration again");
+        writeStateFile(versionFile, version + "\n");
     }
 
     private static boolean runInBackground(Context context, String script) {

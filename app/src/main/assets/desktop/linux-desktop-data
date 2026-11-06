@@ -57,56 +57,36 @@ backup_size_kb() {
   echo "$total"
 }
 
-# Never overwrite existing target files during migration, including on retries.
-copy_verified() {
-  local from="$1" to="$2" item rel other
+# True when OTHER is an identical copy of ITEM: same symlink target, same file content, or a directory.
+same_entry() {
+  local item="$1" other="$2"
+  if [ -L "$item" ]; then
+    [ -L "$other" ] && [ "$(readlink "$item")" = "$(readlink "$other")" ]
+  elif [ -f "$item" ]; then
+    [ -f "$other" ] && [ ! -L "$other" ] && cmp -s "$item" "$other"
+  elif [ -d "$item" ]; then
+    [ -d "$other" ] && [ ! -L "$other" ]
+  else
+    return 1
+  fi
+}
+
+# Every entry under FROM has an identical copy under TO. With --existing-only, entries missing from TO are
+# fine (used before copying, so a retry never overwrites a different file already at the destination).
+tree_matches() {
+  local existing_only=0 from to item other
+  [ "$1" = --existing-only ] && { existing_only=1; shift; }
+  from="$1" to="$2"
   while IFS= read -r -d '' item; do
-    rel="${item#"$from"/}"
-    other="$to/$rel"
-    if [ -e "$other" ] || [ -L "$other" ]; then
-      if [ -L "$item" ]; then
-        [ -L "$other" ] && [ "$(readlink "$item")" = "$(readlink "$other")" ] || return 1
-      elif [ -f "$item" ]; then
-        [ -f "$other" ] && [ ! -L "$other" ] && cmp -s "$item" "$other" || return 1
-      elif [ -d "$item" ]; then
-        [ -d "$other" ] && [ ! -L "$other" ] || return 1
-      else
-        return 1
-      fi
-    fi
-  done < <(find "$from" -mindepth 1 -print0)
-  cp -rn "$from/." "$to/" || return 1
-  while IFS= read -r -d '' item; do
-    rel="${item#"$from"/}"
-    other="$to/$rel"
-    if [ -L "$item" ]; then
-      [ -L "$other" ] && [ "$(readlink "$item")" = "$(readlink "$other")" ] || return 1
-    elif [ -f "$item" ]; then
-      [ -f "$other" ] && [ ! -L "$other" ] && cmp -s "$item" "$other" || return 1
-    elif [ -d "$item" ]; then
-      [ -d "$other" ] && [ ! -L "$other" ] || return 1
-    else
-      return 1
-    fi
+    other="$to/${item#"$from"/}"
+    if [ "$existing_only" = 1 ] && [ ! -e "$other" ] && [ ! -L "$other" ]; then continue; fi
+    same_entry "$item" "$other" || return 1
   done < <(find "$from" -mindepth 1 -print0)
 }
 
-# Backups can only be deleted after every saved entry matches its current destination.
-backup_verified() {
-  local from="$1" to="$2" item rel other
-  while IFS= read -r -d '' item; do
-    rel="${item#"$from"/}"
-    other="$to/$rel"
-    if [ -L "$item" ]; then
-      [ -L "$other" ] && [ "$(readlink "$item")" = "$(readlink "$other")" ] || return 1
-    elif [ -f "$item" ]; then
-      [ -f "$other" ] && [ ! -L "$other" ] && cmp -s "$item" "$other" || return 1
-    elif [ -d "$item" ]; then
-      [ -d "$other" ] && [ ! -L "$other" ] || return 1
-    else
-      return 1
-    fi
-  done < <(find "$from" -mindepth 1 -print0)
+# Copies FROM into TO without overwriting anything, then checks every copied entry.
+copy_verified() {
+  tree_matches --existing-only "$1" "$2" && cp -rn "$1/." "$2/" && tree_matches "$1" "$2"
 }
 
 if [ "${1:-}" = "--purge-backups" ]; then
@@ -125,22 +105,19 @@ if [ "${1:-}" = "--purge-backups" ]; then
       fail "The $d folder does not point to the applied destination; backups were kept."
   done
   # Verify every backup before deleting any; a mismatch preserves all copies.
+  backups=()
   for backup in "$MARK"/backup-*; do
     [ -d "$backup" ] && [ ! -L "$backup" ] && valid_backup_name "$backup" || continue
     folder="${backup##*/backup-}"
     folder="${folder%%-*}"
-    backup_verified "$backup" "$TARGET/$folder" ||
-      fail "Backup ${backup##*/} differs from destination; no backups deleted."
+    tree_matches "$backup" "$TARGET/$folder" ||
+      fail "Backup ${backup##*/} contains files absent or different at the destination; no backups deleted."
+    backups+=("$backup")
   done
   status running "Deleting confirmed internal backup copies"
   freed_kb=0
   removed=0
-  for backup in "$MARK"/backup-*; do
-    [ -d "$backup" ] && [ ! -L "$backup" ] && valid_backup_name "$backup" || continue
-    folder="${backup##*/backup-}"
-    folder="${folder%%-*}"
-    backup_verified "$backup" "$TARGET/$folder" ||
-      fail "Backup ${backup##*/} contains files absent or different at the destination; keeping all backups."
+  for backup in "${backups[@]}"; do
     size="$(du -sk "$backup" 2>/dev/null | awk 'NR==1 {print $1}')"
     [[ "$size" =~ ^[0-9]+$ ]] || size=0
     rm -rf -- "$backup" || fail "Could not delete an old backup: ${backup##*/}"

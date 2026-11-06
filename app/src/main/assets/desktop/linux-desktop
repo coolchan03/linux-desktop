@@ -6,6 +6,12 @@ lxdesk_rotate_log "$HOME/.config/linux-desktop/desktop.log"
 MARK="$HOME/.config/linux-desktop/installed-v1"
 STATUS="$HOME/.config/linux-desktop/start-state"
 echo "starting|Preparing X11" > "$STATUS"
+# linux-desktop-stop records "stopping" before it ends the session: that is not a startup failure, must not
+# overwrite its "stopped" result, and must not switch the device to software rendering.
+stop_requested() {
+  case "$(head -n 1 "$STATUS" 2>/dev/null)" in stopping\|*|stopped\|*) return 0 ;; esac
+  return 1
+}
 # When started by the app (no terminal), keep a log for troubleshooting.
 [ -t 1 ] || exec >>"$HOME/.config/linux-desktop/desktop.log" 2>&1
 
@@ -59,6 +65,7 @@ X11_PID=$!
 tries=0
 while [ ! -S "$X11_SOCKET" ] && [ $tries -lt 150 ]; do
   if ! kill -0 "$X11_PID" 2>/dev/null; then
+    stop_requested && exit 0
     echo "failed|Embedded X11 process exited before readiness. See x11.log" > "$STATUS"
     wait "$X11_PID" 2>/dev/null; exit_code=$?
     echo "Embedded X11 exited (code $exit_code). See x11.log and Android logcat."
@@ -118,6 +125,7 @@ while [ "$tries" -lt 120 ]; do
   tries=$((tries + 1))
 done
 if [ "$xfce_ready" -ne 1 ]; then
+  stop_requested && exit 0
   if [ "$GPU_PROFILE_USED" -eq 1 ] && [ ! -f "$SOFTWARE_GL" ]; then
     echo "GPU XFCE launch failed; retrying once with software rendering" >> "$HOME/.config/linux-desktop/desktop.log"
     touch "$SOFTWARE_GL"
@@ -134,5 +142,5 @@ fi
 echo "ready|X11 and XFCE are running" > "$STATUS"
 wait "$XFCE_PID"
 RESULT=$?
-echo "failed|XFCE session ended (exit $RESULT). See desktop.log" > "$STATUS"
+stop_requested || echo "failed|XFCE session ended (exit $RESULT). See desktop.log" > "$STATUS"
 exit "$RESULT"
